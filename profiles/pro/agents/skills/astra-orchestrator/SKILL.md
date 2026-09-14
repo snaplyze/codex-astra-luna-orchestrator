@@ -130,7 +130,7 @@ For every delegated task:
 
 1. call `spawn_agent`
 2. give the agent a descriptive task name using underscores
-3. explicitly specify the intended model
+3. select the intended role/model using the spawn compatibility rules below
 4. give the subagent a bounded delegation contract
 5. retain the returned task name or identifier
 6. wait for required agents before final synthesis
@@ -144,6 +144,32 @@ Do not spawn Astra workers except for the `reviewer` role unless:
 - the root determines that a high-risk architectural or security review needs Astra
 
 Routine execution should remain on Luna.
+
+### Spawn compatibility and context
+
+Check the active `spawn_agent` tool schema before constructing a call. Use its actual parameter names and supported values.
+
+For bounded work, explicitly set `fork_turns = "none"` and provide a self-contained delegation contract. Do not omit this field when choosing an explicit role, model, or reasoning effort: omission may default to a full-history fork.
+
+- Prefer `agent_type` with the installed named role when its configured model and reasoning match the selected profile. Do not redundantly override fixed role settings.
+- If an explicit `model` or `reasoning_effort` is needed and supported, keep `fork_turns = "none"`. Naming a model in the task message does not select it.
+- Do not combine `fork_turns = "all"` with an explicit `agent_type`, `model`, or `reasoning_effort`. A full-history fork is only appropriate when parent configuration inheritance is intended and the active tool permits that combination.
+- Use a limited history fork only when the tool explicitly supports it with the selected role/model and the inherited turns are necessary.
+
+Example for an installed explorer role:
+
+```json
+{
+  "task_name": "backend_readiness",
+  "agent_type": "explorer",
+  "fork_turns": "none",
+  "message": "Objective: assess backend MVP readiness. Repository: /absolute/path/to/project. Scope: API, storage, and related acceptance tests. Read the applicable AGENTS.md. Read only; other agents may be editing this tree. Return implemented capabilities, missing acceptance criteria, evidence paths, and uncertainty. Do not edit files or run mutating checks."
+}
+```
+
+Supply the repository path, relevant files or findings, ownership boundaries, and acceptance criteria in the message. A no-history child cannot infer the parent's task or decisions. Do not pass the whole transcript when a bounded brief is sufficient.
+
+If a call is rejected for incompatible fork parameters, correct those parameters before retrying with the same task boundaries. Do not repeat the invalid combination or silently change the intended model. Count delegation only after a successful spawn response.
 
 ---
 
@@ -464,4 +490,4 @@ If the user explicitly asks to see delegation, report:
 - assigned task
 - completion status
 
-Do not claim a Luna agent was used unless the trace contains a successful `spawn_agent` call using `gpt-5.6-luna`.
+Do not claim a Luna agent was used unless the trace contains a successful `spawn_agent` call and its resolved role configuration or runtime metadata confirms `gpt-5.6-luna`. An explicit model argument is not required when the named role supplies it.
