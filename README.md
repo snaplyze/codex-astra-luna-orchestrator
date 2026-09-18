@@ -273,12 +273,15 @@ policy.
 For cheaper/faster runs:
 - lower Pro's Astra reasoning from `medium` to `low`
 - set Luna reasoning to `low` or `medium`
-- use 3-4 concurrent threads
+- choose a max-2 profile when two concurrent threads are enough for the task
 
 For larger codebases:
 - consider raising Pro's Astra reasoning to `high`
 - start with your plan's Luna default and adjust based on results
-- use 6-8 concurrent threads, only when tasks are actually independent
+- use the standard profile's four-thread cap for independent work; the max-2
+  profiles intentionally cap concurrency at two
+- if you manually raise `max_concurrent_threads_per_session`, confirm that
+  your Codex version and plan support the higher limit before relying on it
 
 For strict parent/child separation:
 - keep explorer/reviewer/researcher read-only
@@ -316,7 +319,9 @@ model_reasoning_effort = "max"
 
 Explicit model choices during a spawn override `[agents]` defaults. Custom agent files that specify `model` or `model_reasoning_effort` also take precedence over inherited defaults.
 
-The execution role files are pinned to Luna intentionally, while the reviewer is pinned to Astra for independent final review. Astra remains the orchestrator unless you deliberately change the role configuration.
+The selected profile determines the root model: Pro uses Astra, while Plus uses
+Luna. The execution role files are pinned to Luna intentionally, and the
+reviewer is pinned to Astra for an independent final review.
 
 ## License
 

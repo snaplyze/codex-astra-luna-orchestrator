@@ -11,7 +11,8 @@ four-thread limit, and `pro-max-2-subagents` plus `plus-max-2-subagents` with
 a two-thread limit. Max-2 profiles preserve their corresponding root models,
 role models, reasoning efforts, and adaptive routing policy. Pro uses GPT-6
 Astra at `medium`; Plus uses GPT-5.6 Luna at `max`. Both use an Astra reviewer
-at `low`.
+at `low`. The bundled limits are deliberate; change them manually only after
+confirming that your Codex version and plan support a higher concurrency cap.
 
 ## What Codex records
 
