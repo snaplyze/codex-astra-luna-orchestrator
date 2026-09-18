@@ -43,6 +43,9 @@ class ThreadRoleTests(unittest.TestCase):
             with self.subTest(meta=meta):
                 self.assertEqual(thread_role(meta), expected)
 
+    def test_scalar_subagent_source_is_classified_as_unknown(self):
+        self.assertEqual(thread_role({"source": {"subagent": 42}}), ("unknown", ""))
+
 
 class TokenUsageCliTests(unittest.TestCase):
     def run_cli(self, *args):
@@ -98,6 +101,109 @@ class TokenUsageCliTests(unittest.TestCase):
             sum(thread["per_model"]["test-model"]["total_tokens"] for thread in report["threads"]),
             400,
         )
+
+    def test_invalid_date_is_reported_as_usage_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--sessions-dir",
+                    directory,
+                    "--date",
+                    "not-a-date",
+                    "--list",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("usage:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_malformed_metadata_and_rollout_records_are_skipped_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid_records = [
+                {
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "root",
+                        "session_id": "root",
+                        "source": "cli",
+                        "timestamp": "2026-09-09T12:00:00Z",
+                    },
+                },
+                {"type": "turn_context", "payload": {"model": "test-model"}},
+                {
+                    "type": "token_usage_record",
+                    "payload": {
+                        "usage": {"input_tokens": 90, "output_tokens": 10, "total_tokens": 100},
+                    },
+                },
+            ]
+            (Path(directory) / "rollout-valid.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(valid_records[0]),
+                        "[]",
+                        json.dumps({"timestamp": [1]}),
+                        json.dumps(valid_records[1]),
+                        json.dumps({"type": "token_usage_record", "payload": []}),
+                        json.dumps(valid_records[2]),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (Path(directory) / "rollout-malformed-meta.jsonl").write_text(
+                json.dumps({"type": "session_meta", "payload": "not-a-dict"}),
+                encoding="utf-8",
+            )
+            (Path(directory) / "rollout-scalar-subagent.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "type": "session_meta",
+                                "payload": {
+                                    "id": "scalar-subagent",
+                                    "session_id": "root",
+                                    "source": {"subagent": 42},
+                                },
+                            }
+                        ),
+                        json.dumps(valid_records[1]),
+                        json.dumps(valid_records[2]),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--sessions-dir",
+                    directory,
+                    "--root",
+                    "root",
+                    "--format",
+                    "json",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(len(report["threads"]), 2)
+        self.assertEqual(
+            next(thread for thread in report["threads"] if thread["id"] == "scalar-subagent")["role"],
+            "unknown",
+        )
+        self.assertEqual(report["threads"][0]["per_model"]["test-model"]["total_tokens"], 100)
 
 
 if __name__ == "__main__":

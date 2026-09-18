@@ -2,9 +2,9 @@
 
 <!-- Modified for this distribution: adaptive delegation guidance, setup URL, and maintainer details. -->
 
-A configurable Codex setup where GPT-6 Astra is the root/orchestrator and reviewer, while GPT-5.6 Luna is the default and pinned model for execution subagents.
+A configurable Codex setup with four profiles: standard Pro and Plus profiles allow four concurrent subagent threads, while `pro-max-2-subagents` and `plus-max-2-subagents` cap concurrency at two. Pro uses GPT-6 Astra as root; Plus uses GPT-5.6 Luna as root.
 
-The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium reasoning to orchestrate and GPT-5.6 Luna at max reasoning for execution subagents. Plus uses GPT-5.6 Luna at max reasoning to orchestrate and medium reasoning for execution subagents. Both plans retain the separate GPT-6 Astra reviewer at low reasoning.
+The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium reasoning to orchestrate and GPT-5.6 Luna at max reasoning for execution subagents. Plus uses GPT-5.6 Luna at max reasoning to orchestrate and medium reasoning for execution subagents. Both plans retain the separate GPT-6 Astra reviewer at low reasoning. Max-2 variants preserve their corresponding models, roles, reasoning, and local adaptive routing policy; only the concurrency limit changes.
 
 ## Layout
 
@@ -14,9 +14,11 @@ The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium r
 │   ├── pro/
 │   │   ├── codex/           (config.toml and agents/*.toml)
 │   │   └── agents/          (skills/astra-orchestrator/SKILL.md)
-│   └── plus/
-│       ├── codex/           (config.toml and agents/*.toml)
-│       └── agents/          (skills/astra-orchestrator/SKILL.md)
+│   ├── pro-max-2-subagents/  (same Pro settings, max 2 concurrent threads)
+│   ├── plus/
+│   │   ├── codex/           (config.toml and agents/*.toml)
+│   │   └── agents/          (skills/astra-orchestrator/SKILL.md)
+│   └── plus-max-2-subagents/ (same Plus settings, max 2 concurrent threads)
 ├── guides/
 │   ├── fast-iteration.md
 │   ├── complex-repo-work.md
@@ -32,15 +34,15 @@ The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium r
 └── LICENSE
 ```
 
-## Current Plus and Pro configuration
+## Current profile configuration
 
-| Role or setting | Plus | Pro |
-|---|---|---|
-| Orchestrator | GPT-5.6 Luna — max | GPT-6 Astra — medium |
-| Explorer, worker, tester, researcher | GPT-5.6 Luna — medium | GPT-5.6 Luna — max |
-| Default subagent | GPT-5.6 Luna — medium | GPT-5.6 Luna — max |
-| Independent reviewer | GPT-6 Astra — low | GPT-6 Astra — low |
-| Concurrent subagent limit | 4 | 4 |
+| Role or setting | Pro | Pro max-2 | Plus | Plus max-2 |
+|---|---|---|---|---|
+| Orchestrator | GPT-6 Astra — medium | GPT-6 Astra — medium | GPT-5.6 Luna — max | GPT-5.6 Luna — max |
+| Explorer, worker, tester, researcher | GPT-5.6 Luna — max | GPT-5.6 Luna — max | GPT-5.6 Luna — medium | GPT-5.6 Luna — medium |
+| Default subagent | GPT-5.6 Luna — max | GPT-5.6 Luna — max | GPT-5.6 Luna — medium | GPT-5.6 Luna — medium |
+| Independent reviewer | GPT-6 Astra — low | GPT-6 Astra — low | GPT-6 Astra — low | GPT-6 Astra — low |
+| Concurrent subagent limit | 4 | 2 | 4 | 2 |
 
 ### Pro — `profiles/pro/codex/config.toml`
 
@@ -82,7 +84,7 @@ Each role file is explicitly pinned to its intended model: Luna for explorer, wo
 
 The four Luna role files explicitly set `model_reasoning_effort = "max"` in the Pro profile and `"medium"` in the Plus profile. The reviewer keeps its explicit `low` effort in both.
 
-When updating an existing installation, copy the role files along with `config.toml` from the selected profile. Replace `<plan>` below with `pro` or `plus`.
+When updating an existing installation, copy the role files along with `config.toml` from the selected profile. Replace `<profile>` below with `pro`, `pro-max-2-subagents`, `plus`, or `plus-max-2-subagents`.
 
 If you want all named roles, including the reviewer, to follow the `[agents]` defaults, remove both the `model` and `model_reasoning_effort` overrides from their role files.
 
@@ -135,22 +137,27 @@ Next, choose your Codex plan:
 Codex plan:
   1) Pro  - GPT-6 Astra orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews
   2) Plus - GPT-5.6 Luna (max reasoning) orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews
-Select plan [1/2] (default 1):
+  3) Pro (max 2 subagents)  - Pro profile with two concurrent subagent threads
+  4) Plus (max 2 subagents) - Plus profile with two concurrent subagent threads
+Select plan [1-4] (default 1):
 ```
 
 The selected configuration sets both the root and default subagent reasoning.
-Agent role files are shared between plans: explorer, worker, tester, and
-researcher use Luna at the plan's default effort; the reviewer uses Astra at low
-effort on both plans.
+The max-2 choices preserve the corresponding models, roles, and reasoning while
+limiting concurrent subagent threads to two. Agent role files are shared between
+plans: explorer, worker, tester, and researcher use Luna at the plan's default
+effort; the reviewer uses Astra at low effort on all four profiles.
 
 The installer then asks whether to install each component:
 
 - `profiles/<plan>/codex` contains the root configuration and agent role profiles, installed as `.codex`.
 - `profiles/<plan>/agents` contains the `astra-orchestrator` skill, installed as `.agents`.
 - `AGENTS.md` gives Codex the project-level orchestration instructions. If it
-  already exists, setup appends the instructions and preserves its contents.
-  Re-running setup skips the append when the same instructions are already
-  present. Symbolic links and incompatible targets are skipped.
+  already exists, setup asks separately before appending to an unmanaged file or
+  updating an older managed block, and preserves the user-owned contents.
+  Re-running setup recognizes the managed block idempotently, including when the
+  file uses CRLF line endings. Symbolic links and incompatible targets are
+  skipped.
 
 Press Enter or answer `y` to install a component; answer `n` to skip it. All
 three components are selected by default.
@@ -166,7 +173,9 @@ Update .codex? New files will be added; only paths listed above will be replaced
 
 Existing-file updates default to `n`. If approved, missing files are added and
 only the listed paths are replaced. Other files already present in the target
-component remain untouched.
+component remain untouched. Component changes are backed up during the run and
+rolled back if a later installation step fails. If you decline one or more
+components, setup completes but reports that the installation is partial.
 
 After setup, launch Codex from the target repository. Project-scoped `.codex`
 configuration is loaded only for trusted projects.
@@ -190,8 +199,10 @@ For the skill, copy `profiles/<plan>/agents/skills/astra-orchestrator/` to:
 ~/.agents/skills/astra-orchestrator/
 ```
 
-Merge the settings from `profiles/pro/codex/config.toml` (Pro) or `profiles/plus/codex/config.toml`
-(Plus) into your existing:
+Merge the settings from the matching profile, such as
+`profiles/pro/codex/config.toml`, `profiles/pro-max-2-subagents/codex/config.toml`,
+`profiles/plus/codex/config.toml`, or
+`profiles/plus-max-2-subagents/codex/config.toml`, into your existing:
 
 ```text
 ~/.codex/config.toml
