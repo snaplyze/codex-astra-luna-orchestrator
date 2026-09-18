@@ -172,6 +172,7 @@ function Get-ManagedBlockInfo {
     param(
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
+        [AllowEmptyString()]
         [string[]]$Lines
     )
 
