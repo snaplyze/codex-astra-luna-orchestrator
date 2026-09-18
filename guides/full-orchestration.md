@@ -1,11 +1,12 @@
-# Pro Profile: Astra + Luna Orchestration
+# Pro Profiles: Astra + Luna Orchestration
 
 Choose this preset when you want Astra to plan, orchestrate, and review while
-Luna handles the execution roles. Select Pro in `setup.sh` or `setup.ps1`.
-Setup copies `profiles/pro/codex/` to `.codex/` and
-`profiles/pro/agents/` to `.agents/` in the target repository without
-rewriting configuration. For manual installation, copy those same folders
-and the repository's `AGENTS.md` to the target.
+Luna handles the execution roles. Select Pro in `setup.sh` or `setup.ps1` for
+four concurrent threads, or select Pro (max 2 subagents) for the same topology
+capped at two. Setup copies the selected `profiles/<plan>/codex/` to `.codex/`
+and `profiles/<plan>/agents/` to `.agents/` in the target repository without
+rewriting configuration. For manual installation, copy those same folders and
+the repository's `AGENTS.md` to the target.
 
 The topology is:
 
@@ -31,6 +32,8 @@ max_concurrent_threads_per_session = 4
 default_subagent_model = "gpt-5.6-luna"
 default_subagent_reasoning_effort = "max"
 ```
+
+The max-2 profile changes only `max_concurrent_threads_per_session` to `2`.
 
 For the named roles, use these model settings in the corresponding files under
 `.codex/agents/`:

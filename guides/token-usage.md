@@ -6,6 +6,14 @@ of each subagent's context is served from cache. What this guide gives you
 instead is a repeatable way to measure your own runs, one sample run for
 scale, and the caveats needed to read the numbers correctly.
 
+There are four profile choices: standard Pro and Plus profiles with a
+four-thread limit, and `pro-max-2-subagents` plus `plus-max-2-subagents` with
+a two-thread limit. Max-2 profiles preserve their corresponding root models,
+role models, reasoning efforts, and adaptive routing policy. Pro uses GPT-6
+Astra at `medium`; Plus uses GPT-5.6 Luna at `max`. Both use an Astra reviewer
+at `low`. The bundled limits are deliberate; change them manually only after
+confirming that your Codex version and plan support a higher concurrency cap.
+
 ## What Codex records
 
 Codex writes one rollout file per thread under
@@ -63,16 +71,17 @@ If you want numbers that are comparable across configurations:
    change. Write the prompts down and reuse them verbatim.
 2. Run each task in at least two configurations:
    - Baseline: Astra root only, `[agents] enabled = false`, no skill.
-   - Orchestrated: the selected Pro or Plus profile as installed.
+   - Orchestrated: the selected Pro, Pro max-2, Plus, or Plus max-2 profile as installed.
    - Optional floor: Luna root only, to see the cheapest possible run.
 3. Record for every run: per-model uncached input, cached input, output and
    reasoning tokens; number of subagents spawned; wall time; and the change
    in 5-hour and 7-day `used_percent`.
 4. Repeat each cell two or three times. Variance between runs of the same
    prompt is large enough that a single sample misleads.
-5. Record the profile and any overrides: Pro uses Astra `medium` with Luna
-   `max`; Plus uses Luna `max` with Luna `medium`. Both use an Astra `low`
-   reviewer. Note the Codex version. Caching behaviour and subagent context handling
+5. Record the profile and any overrides: Pro and Pro max-2 use Astra `medium`
+   with Luna `max`; Plus and Plus max-2 use Luna `max` with Luna `medium`.
+   All profiles use an Astra `low` reviewer. Note whether the concurrency
+   limit is 4 or 2, plus the Codex version. Caching behaviour and subagent context handling
    change between releases.
 
 Suggested results table:

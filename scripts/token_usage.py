@@ -39,11 +39,15 @@ def empty_usage() -> dict[str, int]:
 
 def add_usage(target: dict[str, int], usage: dict) -> None:
     for k in USAGE_KEYS:
-        target[k] += int(usage.get(k) or 0)
+        value = usage.get(k)
+        try:
+            target[k] += int(value or 0)
+        except (TypeError, ValueError):
+            continue
 
 
 def parse_ts(value: str | None) -> datetime | None:
-    if not value:
+    if not isinstance(value, str) or not value:
         return None
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -62,6 +66,14 @@ def iter_rollouts(sessions_dir: Path, date: str | None):
     yield from sorted(sessions_dir.rglob("rollout-*.jsonl"))
 
 
+def date_arg(value: str) -> str:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected date in YYYY-MM-DD format") from exc
+    return value
+
+
 def read_meta(path: Path) -> dict | None:
     try:
         with path.open("r", encoding="utf-8") as fh:
@@ -72,9 +84,10 @@ def read_meta(path: Path) -> dict | None:
         obj = json.loads(first)
     except json.JSONDecodeError:
         return None
-    if obj.get("type") != "session_meta":
+    if not isinstance(obj, dict) or obj.get("type") != "session_meta":
         return None
-    return obj.get("payload") or {}
+    payload = obj.get("payload")
+    return payload if isinstance(payload, dict) else None
 
 
 def thread_role(meta: dict) -> tuple[str, str]:
@@ -84,15 +97,24 @@ def thread_role(meta: dict) -> tuple[str, str]:
         sub = source.get("subagent") or {}
         if isinstance(sub, str):
             return sub, ""
-        spawn = sub.get("thread_spawn")
-        if isinstance(spawn, dict):
-            return spawn.get("agent_role") or "subagent", spawn.get("agent_nickname") or ""
-        other = sub.get("other")
-        if other:
-            return str(other), ""
-    if meta.get("id") == meta.get("session_id"):
+        if isinstance(sub, dict):
+            spawn = sub.get("thread_spawn")
+            if isinstance(spawn, dict):
+                role = spawn.get("agent_role")
+                nickname = spawn.get("agent_nickname")
+                return (
+                    role if isinstance(role, str) and role else "subagent",
+                    nickname if isinstance(nickname, str) else "",
+                )
+            other = sub.get("other")
+            if other:
+                return str(other), ""
+    meta_id = meta.get("id")
+    session_id = meta.get("session_id")
+    if meta_id and meta_id == session_id:
         return "root", ""
-    return meta.get("thread_source") or "unknown", ""
+    thread_source = meta.get("thread_source")
+    return thread_source if isinstance(thread_source, str) and thread_source else "unknown", ""
 
 
 def analyze_thread(path: Path, meta: dict) -> dict:
@@ -113,37 +135,48 @@ def analyze_thread(path: Path, meta: dict) -> dict:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(obj, dict):
+                continue
             ts = parse_ts(obj.get("timestamp"))
             if ts and (last_ts is None or ts > last_ts):
                 last_ts = ts
             kind = obj.get("type")
-            payload = obj.get("payload") or {}
+            payload = obj.get("payload")
+            if not isinstance(payload, dict):
+                continue
             if kind == "turn_context":
-                model = payload.get("model") or model
+                candidate_model = payload.get("model")
+                if isinstance(candidate_model, str) and candidate_model:
+                    model = candidate_model
                 effort = payload.get("effort") or effort
             elif kind == "token_usage_record" or (
                 kind == "event_msg" and payload.get("type") == "token_usage_record"
             ):
                 # One record per model response; `usage` is the per-response delta.
-                usage = payload.get("usage") or {}
+                usage = payload.get("usage")
+                if not isinstance(usage, dict):
+                    continue
                 key = model or "unknown"
                 add_usage(per_model[key], usage)
                 responses[key] += 1
             elif kind == "event_msg":
                 sub = payload.get("type")
                 if sub == "token_count":
-                    info = payload.get("info") or {}
-                    if info.get("total_token_usage"):
-                        last_total = info["total_token_usage"]
+                    info = payload.get("info")
+                    if not isinstance(info, dict):
+                        continue
+                    total_usage = info.get("total_token_usage")
+                    if isinstance(total_usage, dict):
+                        last_total = total_usage
                     limits = payload.get("rate_limits")
-                    if limits:
+                    if isinstance(limits, dict) and limits:
                         if rate_first is None:
                             rate_first = limits
                         rate_last = limits
 
     # Older Codex builds may not emit token_usage_record; fall back to the
     # cumulative counter attributed to the last active model.
-    if not per_model and last_total:
+    if not per_model and isinstance(last_total, dict):
         add_usage(per_model[model or "unknown"], last_total)
 
     return {
@@ -173,6 +206,8 @@ def collect_sessions(sessions_dir: Path, date: str | None) -> dict[str, list[tup
         if not meta:
             continue
         root = meta.get("session_id") or meta.get("id")
+        if not isinstance(root, str) or not root:
+            continue
         sessions[root].append((path, meta))
     return sessions
 
@@ -304,7 +339,11 @@ def list_sessions(sessions: dict[str, list[tuple[Path, dict]]], limit: int) -> N
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sessions-dir", default=os.path.expanduser("~/.codex/sessions"))
-    parser.add_argument("--date", help="Only scan rollouts for this day (YYYY-MM-DD). Much faster.")
+    parser.add_argument(
+        "--date",
+        type=date_arg,
+        help="Only scan rollouts for this day (YYYY-MM-DD). Much faster.",
+    )
     parser.add_argument("--list", action="store_true", help="List root sessions and their subagent counts.")
     parser.add_argument("--limit", type=int, default=20, help="Rows to show with --list.")
     parser.add_argument("--root", help="Root thread id (or unique prefix) to report on.")

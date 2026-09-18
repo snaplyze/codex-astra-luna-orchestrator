@@ -2,6 +2,7 @@
 
 <!-- Modified for this distribution: adaptive delegation routing guidance. -->
 
+<!-- BEGIN codex-astra-luna-orchestrator:managed -->
 For complex coding tasks, use the `astra-orchestrator` skill when its trigger conditions match.
 
 The root agent owns architecture, scope decisions, delegation, integration, and final verification.
@@ -21,3 +22,4 @@ Do not delegate trivial work merely for parallelism.
 Do not let multiple implementation agents edit the same files without explicit ownership boundaries.
 Model and reasoning assignments live in `.codex/config.toml` and `.codex/agents/*.toml`; this file defines behavior and boundaries rather than duplicating configuration.
 User instructions always take precedence over this orchestration policy.
+<!-- END codex-astra-luna-orchestrator:managed -->
