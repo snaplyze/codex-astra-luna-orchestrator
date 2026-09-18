@@ -348,6 +348,8 @@ function Write-TextLines {
         [string]$Path,
 
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
         [string[]]$Lines
     )
 

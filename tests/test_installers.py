@@ -172,7 +172,7 @@ class InstallerIntegrationTests(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
 
             agents = target / "AGENTS.md"
-            agents.write_bytes(agents.read_bytes().replace(b"\n", b"\r\n"))
+            agents.write_bytes(agents.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
             second = self.run_installer(target, ["1", "n", "n", "y"])
 
             self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
