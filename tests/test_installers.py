@@ -50,7 +50,7 @@ class InstallerIntegrationTests(unittest.TestCase):
         return target
 
     def test_max_two_profile_is_installed_from_numeric_selection(self) -> None:
-        for selection, model in (("3", "gpt-6-astra"), ("4", "gpt-5.6-luna")):
+        for selection, model in (("3", "gpt-6-astra"), ("4", "gpt-6-luna")):
             with self.subTest(selection=selection):
                 with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
                     target = self.make_target(directory)
@@ -62,6 +62,79 @@ class InstallerIntegrationTests(unittest.TestCase):
                     config = (target / ".codex" / "config.toml").read_text()
                     self.assertIn("max_concurrent_threads_per_session = 2", config)
                     self.assertIn(f'model = "{model}"', config)
+
+    def test_all_profiles_install_complete_profile_output(self) -> None:
+        selections = {
+            "1": "pro",
+            "2": "plus",
+            "3": "pro-max-2-subagents",
+            "4": "plus-max-2-subagents",
+        }
+        for selection, profile_name in selections.items():
+            with self.subTest(profile=profile_name):
+                with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+                    target = self.make_target(directory)
+                    result = self.run_installer(target, [selection, "y", "y", "y"])
+
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    profile = ROOT / "profiles" / profile_name
+                    for component, source_component in ((".codex", "codex"), (".agents", "agents")):
+                        expected_files = {
+                            path.relative_to(profile / source_component)
+                            for path in (profile / source_component).rglob("*")
+                            if path.is_file()
+                        }
+                        installed_files = {
+                            path.relative_to(target / component)
+                            for path in (target / component).rglob("*")
+                            if path.is_file()
+                        }
+                        self.assertEqual(installed_files, expected_files)
+                        for relative_path in expected_files:
+                            self.assertEqual(
+                                (target / component / relative_path).read_bytes(),
+                                (profile / source_component / relative_path).read_bytes(),
+                            )
+                    self.assertIn(MANAGED_BEGIN, (target / "AGENTS.md").read_text())
+                    self.assertIn(MANAGED_END, (target / "AGENTS.md").read_text())
+
+    def test_upgrade_from_old_pinned_model_preserves_unrelated_files(self) -> None:
+        for selection, profile_name in (("2", "plus"), ("1", "pro")):
+            with self.subTest(profile=profile_name):
+                with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+                    target = self.make_target(directory)
+                    codex = target / ".codex"
+                    agents = target / ".agents"
+                    shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+                    shutil.copytree(ROOT / "profiles" / "plus" / "agents", agents)
+                    for path in codex.rglob("*.toml"):
+                        content = path.read_text()
+                        content = content.replace("gpt-6-luna", "gpt-5.6-luna")
+                        content = content.replace('model_reasoning_effort = "high"', 'model_reasoning_effort = "medium"')
+                        path.write_text(content)
+                    (agents / "skills" / "astra-orchestrator" / "SKILL.md").write_text("stale skill\n")
+                    (codex / "user-owned.toml").write_text("user-owned codex\n")
+                    (agents / "user-owned.txt").write_text("user-owned agents\n")
+                    (target / "keep.txt").write_text("keep\n")
+
+                    result = self.run_installer(target, [selection, "y", "y", "y", "y", "y"])
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+                    profile = ROOT / "profiles" / profile_name
+                    for component, source_component in ((codex, "codex"), (agents, "agents")):
+                        expected_files = {
+                            path.relative_to(profile / source_component)
+                            for path in (profile / source_component).rglob("*")
+                            if path.is_file()
+                        }
+                        for relative_path in expected_files:
+                            self.assertEqual(
+                                (component / relative_path).read_bytes(),
+                                (profile / source_component / relative_path).read_bytes(),
+                            )
+                    self.assertEqual((codex / "user-owned.toml").read_text(), "user-owned codex\n")
+                    self.assertEqual((agents / "user-owned.txt").read_text(), "user-owned agents\n")
+                    self.assertEqual((target / "keep.txt").read_text(), "keep\n")
 
     def test_invalid_profile_does_not_touch_target(self) -> None:
         with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:

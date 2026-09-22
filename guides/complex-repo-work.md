@@ -1,22 +1,23 @@
 # Complex Repository Work
 
-Choose this preset for architecture changes, difficult debugging, and work
-where higher-confidence reasoning matters more than latency.
-
-This is an optional root override for the [Pro profile](full-orchestration.md),
-whose default is Astra `medium`. It leaves the installed Luna `max` roles
-and Astra `low` reviewer in place. If you adopt this override, update the
-installed skill's root-reasoning wording to match.
-
-Add or merge this into:
-
-`~/.codex/config.toml`
+For architecture changes and difficult debugging, raise the
+[Pro profile](full-orchestration.md) root from Astra `medium` to `high`:
 
 ```toml
 model = "gpt-6-astra"
 model_reasoning_effort = "high"
-service_tier = "standard"
 ```
 
-If your Codex version does not support `service_tier`, remove that line and
-keep the model and reasoning settings.
+Merge these root keys into project `.codex/config.toml` or your personal config.
+The Sol worker/tester remain at `medium`, Luna explorer/researcher at `high`,
+and the Astra reviewer at `low`. Adjust individual roles only when their task
+needs deeper reasoning.
+
+The skill reads effective model settings; no wording edits are required.
+Leave service tier unset unless your active model advertises a tier you intend
+to use. Higher reasoning and more children can increase usage; compare
+[measured runs](token-usage.md).
+
+Use explicit bounded delegation for independent work. Ultra has its own automatic
+delegation behavior and is not enabled by these profiles. See
+[model selection](model-selection.md) before changing that setting.

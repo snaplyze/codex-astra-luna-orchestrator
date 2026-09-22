@@ -1,47 +1,39 @@
 # Plus Profiles
 
-Choose this profile for a Luna root at `max` reasoning and Luna execution
-subagents at `medium` reasoning, with an Astra reviewer at `low`.
-The standard profile allows four concurrent subagent threads; the
-`plus-max-2-subagents` profile keeps the same settings and allows two.
+Choose Plus for a GPT-6 Luna root at `max`, Luna execution roles at `high`,
+and an independent Astra reviewer at `low`. This preserves the budget-oriented
+Luna topology. For complex coding, consider the optional Sol root in
+[model selection](model-selection.md).
 
-The installers (`setup.sh`, `setup.ps1`) ask for your plan and install the
-standard profile automatically when you select `Plus`, or the two-thread
-variant when you select Plus (max 2 subagents). Setup copies the selected
-`profiles/<plan>/codex/` to `.codex/` and `profiles/<plan>/agents/` to `.agents/`
-without rewriting configuration. For manual installation, copy those folders
-and the repository's `AGENTS.md` to the target.
+The standard profile permits four concurrent child threads; `plus-max-2-subagents`
+permits two with identical models, reasoning, and routing.
 
-For a global setup, merge `profiles/plus/codex/config.toml` into:
+Select Plus or Plus (max 2 subagents) in `setup.sh` or `setup.ps1`. For a manual
+installation, copy `codex/` to project `.codex/`, `agents/` to project `.agents/`,
+and add the managed instructions from the repository's `AGENTS.md`.
 
-`~/.codex/config.toml`
+For a global setup, merge the root settings into `~/.codex/config.toml`:
 
 ```toml
-# Root
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "max"
 
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 4
-default_subagent_model = "gpt-5.6-luna"
-default_subagent_reasoning_effort = "medium"
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "high"
 ```
 
-For the two-thread variant, copy the matching files from
-`profiles/plus-max-2-subagents/`.
+Use `2` for the max-2 variant. Also copy the five role files to
+`~/.codex/agents/` and the skill to `~/.agents/skills/astra-orchestrator/`.
+Merge global settings without replacing unrelated configuration.
 
-Subagents keep their pinned models from `.codex/agents/*.toml`. Explorer,
-worker, tester, and researcher explicitly set `model = "gpt-5.6-luna"` and
-`model_reasoning_effort = "medium"`. The reviewer stays on GPT-6 Astra
-on the Plus plan too: it is a single, read-only, `low`-effort thread, and it
-gives you an independent review by a different model than the one that
-planned and wrote the change. If you want the whole session on Luna, change
-`model` in `.codex/agents/reviewer.toml` as well.
+Explorer, worker, tester, and researcher pin `gpt-6-luna` at `high`.
+Reviewer pins `gpt-6-astra` at `low` with read-only defaults. The reviewer
+provides a separate assessment from the model that planned and implemented
+the work; use it when independent review adds value.
 
-See `token-usage.md` for how to measure the difference on your own tasks.
-
-For global installation, also copy `profiles/plus/codex/agents/` to
-`~/.codex/agents/` and `profiles/plus/agents/skills/astra-orchestrator/` to
-`~/.agents/skills/astra-orchestrator/`. Use the skill from the same profile
-as the configuration so its model and reasoning instructions match.
+If you deliberately want every role on Luna, update the reviewer model too.
+The skill follows the effective role settings; start a fresh session after
+changing files. See [token usage](token-usage.md) to compare representative runs.

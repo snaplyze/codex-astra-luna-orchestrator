@@ -1,10 +1,12 @@
-# Codex Astra Orchestrator + Luna Subagents
+# Codex Orchestration with Astra, Sol, and Luna
 
 <!-- Modified for this distribution: adaptive delegation guidance, setup URL, and maintainer details. -->
 
-A configurable Codex setup with four profiles: standard Pro and Plus profiles allow four concurrent subagent threads, while `pro-max-2-subagents` and `plus-max-2-subagents` cap concurrency at two. Pro uses GPT-6 Astra as root; Plus uses GPT-5.6 Luna as root.
+A configurable Codex setup with four profiles: standard Pro and Plus profiles allow four concurrent subagent threads, while `pro-max-2-subagents` and `plus-max-2-subagents` cap concurrency at two. Pro uses GPT-6 Astra as root; Plus uses GPT-6 Luna as root.
 
-The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium reasoning to orchestrate and GPT-5.6 Luna at max reasoning for execution subagents. Plus uses GPT-5.6 Luna at max reasoning to orchestrate and medium reasoning for execution subagents. Both plans retain the separate GPT-6 Astra reviewer at low reasoning. Max-2 variants preserve their corresponding models, roles, reasoning, and local adaptive routing policy; only the concurrency limit changes.
+The installer offers a quality-oriented Pro profile and a budget-oriented Plus profile. Pro uses Astra for coordination, Sol for implementation and testing, and Luna for exploration and research. Plus keeps coordination and execution on Luna. Both retain the independent Astra reviewer. Max-2 variants change only concurrency.
+
+These are project presets, not model access restrictions imposed by your subscription. See [model selection and migration](guides/model-selection.md) for the verified September 22, 2026 release details, routing rationale, and rollout fallback.
 
 ## Layout
 
@@ -20,6 +22,7 @@ The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium r
 │   │   └── agents/          (skills/astra-orchestrator/SKILL.md)
 │   └── plus-max-2-subagents/ (same Plus settings, max 2 concurrent threads)
 ├── guides/
+│   ├── model-selection.md
 │   ├── fast-iteration.md
 │   ├── complex-repo-work.md
 │   ├── routine-coding.md
@@ -29,6 +32,7 @@ The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium r
 ├── scripts/
 │   └── token_usage.py
 ├── AGENTS.md
+├── CHANGELOG.md
 ├── setup.sh
 ├── setup.ps1
 └── LICENSE
@@ -38,9 +42,10 @@ The installer asks which Codex plan you are on. Pro uses GPT-6 Astra at medium r
 
 | Role or setting | Pro | Pro max-2 | Plus | Plus max-2 |
 |---|---|---|---|---|
-| Orchestrator | GPT-6 Astra — medium | GPT-6 Astra — medium | GPT-5.6 Luna — max | GPT-5.6 Luna — max |
-| Explorer, worker, tester, researcher | GPT-5.6 Luna — max | GPT-5.6 Luna — max | GPT-5.6 Luna — medium | GPT-5.6 Luna — medium |
-| Default subagent | GPT-5.6 Luna — max | GPT-5.6 Luna — max | GPT-5.6 Luna — medium | GPT-5.6 Luna — medium |
+| Orchestrator | GPT-6 Astra — medium | GPT-6 Astra — medium | GPT-6 Luna — max | GPT-6 Luna — max |
+| Explorer, researcher | GPT-6 Luna — high | GPT-6 Luna — high | GPT-6 Luna — high | GPT-6 Luna — high |
+| Worker, tester | GPT-6 Sol — medium | GPT-6 Sol — medium | GPT-6 Luna — high | GPT-6 Luna — high |
+| Default subagent | GPT-6 Luna — high | GPT-6 Luna — high | GPT-6 Luna — high | GPT-6 Luna — high |
 | Independent reviewer | GPT-6 Astra — low | GPT-6 Astra — low | GPT-6 Astra — low | GPT-6 Astra — low |
 | Concurrent subagent limit | 4 | 2 | 4 | 2 |
 
@@ -56,14 +61,14 @@ sandbox_mode = "workspace-write"
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 4
-default_subagent_model = "gpt-5.6-luna"
-default_subagent_reasoning_effort = "max"
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "high"
 ```
 
 ### Plus — `profiles/plus/codex/config.toml`
 
 ```toml
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "max"
 
 approval_policy = "on-request"
@@ -72,19 +77,19 @@ sandbox_mode = "workspace-write"
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 4
-default_subagent_model = "gpt-5.6-luna"
-default_subagent_reasoning_effort = "medium"
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "high"
 ```
 
 The installer copies `profiles/<plan>/codex` to `.codex` and
 `profiles/<plan>/agents` to `.agents` in the target repository. Each profile
 is ready to copy, with no configuration rewriting during setup.
 
-Each role file is explicitly pinned to its intended model: Luna for explorer, worker, tester, and researcher; Astra for reviewer. This means changing only `default_subagent_model` will affect generic spawned agents, but not the named roles.
+Each role file pins its own model and effort. Changing only `default_subagent_model` affects generic spawned agents, not these named roles. Pro pins worker/tester to Sol `medium`; all Luna subagents use `high`, and every reviewer uses Astra `low`.
 
-The four Luna role files explicitly set `model_reasoning_effort = "max"` in the Pro profile and `"medium"` in the Plus profile. The reviewer keeps its explicit `low` effort in both.
+The skill reads effective settings instead of duplicating model IDs and efforts. Session overrides and loaded role definitions remain authoritative until you start a new session.
 
-When updating an existing installation, copy the role files along with `config.toml` from the selected profile. Replace `<profile>` below with `pro`, `pro-max-2-subagents`, `plus`, or `plus-max-2-subagents`.
+When updating an existing installation, rerun setup and approve updates to both `.codex` and `.agents`, or copy the config, all role files, and the skill together from the selected profile. Replace `<profile>` below with `pro`, `pro-max-2-subagents`, `plus`, or `plus-max-2-subagents`.
 
 If you want all named roles, including the reviewer, to follow the `[agents]` defaults, remove both the `model` and `model_reasoning_effort` overrides from their role files.
 
@@ -135,18 +140,18 @@ Next, choose your Codex plan:
 
 ```text
 Codex plan:
-  1) Pro  - GPT-6 Astra orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews
-  2) Plus - GPT-5.6 Luna (max reasoning) orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews
-  3) Pro (max 2 subagents)  - Pro profile with two concurrent subagent threads
-  4) Plus (max 2 subagents) - Plus profile with two concurrent subagent threads
+  1) Pro  - Astra root; Luna defaults/explore/research; Sol worker/tester; Astra reviewer
+  2) Plus - Luna root (max); Luna defaults/roles; Astra reviewer
+  3) Pro (max 2 subagents)  - Pro topology with two concurrent subagent threads
+  4) Plus (max 2 subagents) - Plus topology with two concurrent subagent threads
 Select plan [1-4] (default 1):
 ```
 
 The selected configuration sets both the root and default subagent reasoning.
 The max-2 choices preserve the corresponding models, roles, and reasoning while
-limiting concurrent subagent threads to two. Agent role files are shared between
-plans: explorer, worker, tester, and researcher use Luna at the plan's default
-effort; the reviewer uses Astra at low effort on all four profiles.
+limiting concurrent subagent threads to two. Role names are the same in both
+plans, but Pro's worker/tester use Sol and Plus's use Luna. Reviewers use Astra
+at low effort on all four profiles.
 
 The installer then asks whether to install each component:
 
@@ -180,7 +185,7 @@ components, setup completes but reports that the installation is partial.
 After setup, launch Codex from the target repository. Project-scoped `.codex`
 configuration is loaded only for trusted projects.
 
-See `guides/` for copy-paste model presets and the Astra + Luna topology. The
+See `guides/` for copy-paste model presets and the Astra + Sol + Luna topology. The
 guides are intentionally separate from the installers so you can review and
 adapt settings for your Codex version without changing a global config
 automatically.
@@ -233,7 +238,7 @@ and reviewer for an independent final review.
 
 ## Suggested topology
 
-Both profiles choose delegation depth according to the task:
+All four profiles choose delegation depth according to the task:
 
 | Tier | Task | Workflow |
 |---|---|---|
@@ -253,12 +258,12 @@ policy.
       +---------------+---------------+
       |               |               |
    explorer          worker         researcher
-     Luna             Luna             Luna
+     Luna              Sol             Luna
       |               |
       +-------+-------+
               |
            tester
-            Luna
+             Sol
               |
           reviewer
            Astra
@@ -271,19 +276,23 @@ policy.
 ## Tuning
 
 For cheaper/faster runs:
+
 - lower Pro's Astra reasoning from `medium` to `low`
-- set Luna reasoning to `low` or `medium`
+- lower Luna subagent reasoning from `high` to `medium` for simple, bounded tasks
+- use Sol `medium` as an optional root for complex coding; see [model selection](guides/model-selection.md)
 - choose a max-2 profile when two concurrent threads are enough for the task
 
 For larger codebases:
+
 - consider raising Pro's Astra reasoning to `high`
-- start with your plan's Luna default and adjust based on results
+- start with each role's configured model and effort, then adjust based on results
 - use the standard profile's four-thread cap for independent work; the max-2
   profiles intentionally cap concurrency at two
 - if you manually raise `max_concurrent_threads_per_session`, confirm that
   your Codex version and plan support the higher limit before relying on it
 
 For strict parent/child separation:
+
 - keep explorer/reviewer/researcher read-only
 - keep worker/tester workspace-write
 - leave the root in workspace-write so it can integrate changes
@@ -305,13 +314,14 @@ scripts/token_usage.py --latest --date 2026-09-07
 See [`guides/token-usage.md`](guides/token-usage.md) for a measurement
 protocol, one sample run with real numbers, and tips for reducing usage.
 
-Plus users: the root thread is the largest line item, so running it on Luna
-saves the most. Selecting `Plus` in the installer does this for you; for a
+Plus users: long root threads can dominate usage; keeping the root on Luna
+is the budget-oriented starting point. Measure representative tasks before
+assuming savings. Selecting `Plus` in the installer does this for you; for a
 manual or global setup see [`guides/plus-plan.md`](guides/plus-plan.md):
 
 ```toml
 # Root
-model = "gpt-5.6-luna"
+model = "gpt-6-luna"
 model_reasoning_effort = "max"
 ```
 
@@ -320,8 +330,12 @@ model_reasoning_effort = "max"
 Explicit model choices during a spawn override `[agents]` defaults. Custom agent files that specify `model` or `model_reasoning_effort` also take precedence over inherited defaults.
 
 The selected profile determines the root model: Pro uses Astra, while Plus uses
-Luna. The execution role files are pinned to Luna intentionally, and the
-reviewer is pinned to Astra for an independent final review.
+Luna. Pro's worker/tester use Sol; the other execution roles use Luna.
+The reviewer is pinned to Astra for an independent final review.
+
+New models roll out by account and workspace. Confirm availability with `/model`
+and start a fresh session after updating files. Setup copies configuration; it
+does not grant model access or change your global Codex installation.
 
 ## License
 

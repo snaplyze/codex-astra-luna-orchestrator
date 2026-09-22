@@ -20,6 +20,8 @@ Review should be proportional to risk rather than automatically invoking the ful
 
 Do not delegate trivial work merely for parallelism.
 Do not let multiple implementation agents edit the same files without explicit ownership boundaries.
+Schedule independent work within the configured child-thread cap; queue excess work or reuse completed agents.
 Model and reasoning assignments live in `.codex/config.toml` and `.codex/agents/*.toml`; this file defines behavior and boundaries rather than duplicating configuration.
+Use the active runtime role definitions when a session predates a configuration update. Report unavailable models and explicit fallbacks rather than silently substituting them.
 User instructions always take precedence over this orchestration policy.
 <!-- END codex-astra-luna-orchestrator:managed -->

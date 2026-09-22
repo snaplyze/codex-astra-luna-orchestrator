@@ -1,26 +1,24 @@
-# Pro Profiles: Astra + Luna Orchestration
+# Pro Profiles: Astra, Sol, and Luna
 
-Choose this preset when you want Astra to plan, orchestrate, and review while
-Luna handles the execution roles. Select Pro in `setup.sh` or `setup.ps1` for
-four concurrent threads, or select Pro (max 2 subagents) for the same topology
-capped at two. Setup copies the selected `profiles/<plan>/codex/` to `.codex/`
-and `profiles/<plan>/agents/` to `.agents/` in the target repository without
-rewriting configuration. For manual installation, copy those same folders and
-the repository's `AGENTS.md` to the target.
-
-The topology is:
+Choose Pro for an Astra coordinator, Sol implementation and testing, and Luna
+exploration and research. Select Pro in `setup.sh` or `setup.ps1` for four
+concurrent child threads, or Pro (max 2 subagents) for two. Setup copies the
+selected profile's `codex/` and `agents/` folders without rewriting them.
 
 ```text
 Astra root (medium)
-├── Luna explorer (max)
-├── Luna worker (max)
-├── Luna tester (max)
-├── Luna researcher (max)
+├── Luna explorer (high)
+├── Sol worker (medium)
+├── Sol tester (medium)
+├── Luna researcher (high)
 └── Astra reviewer (low)
 ```
 
-Put the root settings in the project-scoped `.codex/config.toml`, or merge
-them into `~/.codex/config.toml` for a personal/global setup:
+These are available roles, not five simultaneous children or a required pipeline.
+Use only roles that add value, within the selected concurrency cap.
+
+Put root settings in project `.codex/config.toml`, or merge them into
+`~/.codex/config.toml` for personal use:
 
 ```toml
 model = "gpt-6-astra"
@@ -29,29 +27,22 @@ model_reasoning_effort = "medium"
 [agents]
 enabled = true
 max_concurrent_threads_per_session = 4
-default_subagent_model = "gpt-5.6-luna"
-default_subagent_reasoning_effort = "max"
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "high"
 ```
 
 The max-2 profile changes only `max_concurrent_threads_per_session` to `2`.
+Copy all five role files from the matching profile's `codex/agents/` too:
 
-For the named roles, use these model settings in the corresponding files under
-`.codex/agents/`:
+| Role files | Model | Effort | Sandbox |
+|---|---|---|---|
+| explorer, researcher | `gpt-6-luna` | `high` | read-only |
+| worker, tester | `gpt-6-sol` | `medium` | workspace-write |
+| reviewer | `gpt-6-astra` | `low` | read-only |
 
-```toml
-# explorer.toml, worker.toml, tester.toml, researcher.toml
-model = "gpt-5.6-luna"
-model_reasoning_effort = "max"
-```
+Named roles override the generic subagent defaults. Copy the matching
+`agents/skills/astra-orchestrator/` folder alongside configuration; the skill
+reads effective settings so optional overrides do not require prose edits.
 
-```toml
-# reviewer.toml
-model = "gpt-6-astra"
-model_reasoning_effort = "low"
-```
-
-The role files override the inherited `[agents]` defaults. Keep those explicit
-overrides when you want the topology above to remain stable. Remove them when
-you want all named roles to follow the defaults in `config.toml`.
-
-For the Luna-root configuration, use the [Plus profile](plus-plan.md).
+See [model selection](model-selection.md) for rationale and availability, or
+[Plus](plus-plan.md) for the budget-oriented Luna-root profile.

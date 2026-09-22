@@ -1,22 +1,19 @@
 # Routine Coding
 
-Choose this preset for predictable, routine coding tasks where lower cost and
-faster orchestration are preferred.
+For predictable, bounded work, lower the [Plus profile](plus-plan.md) root from
+`max` to `high`. This uses the recommended starting effort for GPT-6 Luna in
+the [official Codex model guidance](https://learn.chatgpt.com/docs/models).
 
-This is an optional root override for the [Plus profile](plus-plan.md),
-lowering its Luna root from `max` to `medium`. The installed Luna subagents
-remain at `medium` and the Astra reviewer at `low`. If you adopt this override,
-update the installed skill's root-reasoning wording to match.
-
-Add or merge this into:
-
-`~/.codex/config.toml`
+Merge into project `.codex/config.toml` or your personal configuration:
 
 ```toml
-model = "gpt-5.6-luna"
-model_reasoning_effort = "medium"
-service_tier = "fast"
+model = "gpt-6-luna"
+model_reasoning_effort = "high"
 ```
 
-If your Codex version does not support `service_tier`, remove that line and
-keep the model and reasoning settings.
+The installed Luna roles remain at `high`; the Astra reviewer stays at `low`.
+The skill reads effective settings, so no skill wording needs changing.
+
+For simple edits, stay in the root. Try `medium` only when your own task checks
+show it is sufficient. Fast service is a separate usage/latency choice and is
+not enabled by this budget-oriented preset.

@@ -23,8 +23,8 @@ $banner = @'
 |/_/   \_\____/ |_| |_| \_\/_/   \_\    |
 |                                       |
 |       O R C H E S T R A T O R         |
-|   Plan and orchestrate with Astra.    |
-|          Execute with Luna.           |
+|   GPT-6 Astra/Luna/Sol profiles       |
+|      with role-specific routing       |
 +---------------------------------------+
 '@
 
@@ -61,10 +61,10 @@ function Read-Confirmation {
 
 function Read-Plan {
     [Console]::WriteLine('Codex plan:')
-    [Console]::WriteLine('  1) Pro  - GPT-6 Astra orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews')
-    [Console]::WriteLine('  2) Plus - GPT-5.6 Luna (max reasoning) orchestrates, GPT-5.6 Luna executes, GPT-6 Astra reviews')
-    [Console]::WriteLine('  3) Pro (max 2 subagents)  - Pro profile with two concurrent subagent threads')
-    [Console]::WriteLine('  4) Plus (max 2 subagents) - Plus profile with two concurrent subagent threads')
+    [Console]::WriteLine('  1) Pro  - Astra root; Luna defaults/explore/research; Sol worker/tester; Astra reviewer')
+    [Console]::WriteLine('  2) Plus - Luna root (max); Luna defaults/roles; Astra reviewer')
+    [Console]::WriteLine('  3) Pro (max 2 subagents)  - Pro topology with two concurrent subagent threads')
+    [Console]::WriteLine('  4) Plus (max 2 subagents) - Plus topology with two concurrent subagent threads')
 
     while ($true) {
         [Console]::Write('Select plan [1-4] (default 1): ')

@@ -10,7 +10,7 @@ There are four profile choices: standard Pro and Plus profiles with a
 four-thread limit, and `pro-max-2-subagents` plus `plus-max-2-subagents` with
 a two-thread limit. Max-2 profiles preserve their corresponding root models,
 role models, reasoning efforts, and adaptive routing policy. Pro uses GPT-6
-Astra at `medium`; Plus uses GPT-5.6 Luna at `max`. Both use an Astra reviewer
+Astra at `medium`; Plus uses GPT-6 Luna at `max`. Both use an Astra reviewer
 at `low`. The bundled limits are deliberate; change them manually only after
 confirming that your Codex version and plan support a higher concurrency cap.
 
@@ -78,16 +78,17 @@ If you want numbers that are comparable across configurations:
    in 5-hour and 7-day `used_percent`.
 4. Repeat each cell two or three times. Variance between runs of the same
    prompt is large enough that a single sample misleads.
-5. Record the profile and any overrides: Pro and Pro max-2 use Astra `medium`
-   with Luna `max`; Plus and Plus max-2 use Luna `max` with Luna `medium`.
+5. Record the profile and any overrides: Pro and Pro max-2 use Astra `medium`,
+   Sol `medium` worker/tester, and Luna `high` explorer/researcher; Plus and
+   Plus max-2 use Luna `max` with Luna `high` execution roles.
    All profiles use an Astra `low` reviewer. Note whether the concurrency
    limit is 4 or 2, plus the Codex version. Caching behaviour and subagent context handling
    change between releases.
 
 Suggested results table:
 
-| Task | Config | Astra uncached / cached / out | Luna uncached / cached / out | Subagents | Wall | 5h delta | 7d delta |
-|---|---|---|---|---:|---:|---:|---:|
+| Task | Config | Astra uncached / cached / out | Sol uncached / cached / out | Luna uncached / cached / out | Subagents | Wall | 5h delta | 7d delta |
+|---|---|---|---|---|---:|---:|---:|---:|
 
 ## Reading the numbers
 
@@ -103,7 +104,7 @@ most honest single number for "how much of my plan did this task cost". Note
 that the window is account-wide, so other Codex sessions running at the same
 time inflate the delta.
 
-The root thread is the largest line item even at `low` reasoning. It stays
+The root thread was the largest line item in the historical sample below. It stays
 alive for the whole task, polls subagents, and re-reads its context on every
 response. Parallelism trades tokens for latency: every spawned subagent
 re-reads its own context on every response.
@@ -158,14 +159,14 @@ Takeaways from this single run:
 
 In rough order of impact:
 
-- On Plus, move the root to Luna. The root is the largest line item in every
-  orchestrated session, so this saves more than any subagent change. The
+- On Plus, start with the Luna root and measure the result. Long root threads
+  can dominate usage; savings depend on the task and model behavior. The
   installer does this when you select the Plus plan; for manual setups see
   `plus-plan.md`:
 
   ```toml
   # Root
-  model = "gpt-5.6-luna"
+  model = "gpt-6-luna"
   model_reasoning_effort = "max"
   ```
 
@@ -173,14 +174,13 @@ In rough order of impact:
   this; enforce it by not invoking `$astra-orchestrator` for one-file edits.
 - Keep `max_concurrent_threads_per_session` low. Each extra concurrent
   subagent is a second full context being re-read on every response.
-- Ask subagents for short reports. The skill's "cost and context discipline"
-  section exists because raw logs pasted into the root are re-read by the
+- Ask subagents for short reports. Raw logs pasted into the root are re-read by the
   root on every subsequent response.
 - Skip the reviewer for low-risk changes. It is Astra, and it re-reads the
   diff and surrounding context.
-- Lower Luna to `low` reasoning for explorer and tester roles; output and
-  reasoning tokens are a small share of the total, so this mainly shortens
-  wall time.
+- For simple tasks, try lowering Luna roles from `high` to `medium` and
+  compare quality and usage. Pro's worker/tester use Sol; change the intended
+  role file rather than only the generic subagent default.
 
 ## Contributing results
 

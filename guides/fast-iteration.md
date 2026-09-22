@@ -1,21 +1,26 @@
 # Fast Iteration
 
-Choose this preset when latency matters and you want Astra to orchestrate
-quickly with Luna subagents.
-
-Start with the [Pro profile](full-orchestration.md). This optional root
-preset keeps Astra `medium`; the installed Luna roles remain at `max` and
-the Astra reviewer at `low`. For a Luna root, use the [Plus profile](plus-plan.md).
-
-Add or merge this into:
-
-`~/.codex/config.toml`
+For a Sol coordinator with the [Pro profile](full-orchestration.md), override
+only the root model and effort:
 
 ```toml
-model = "gpt-6-astra"
+model = "gpt-6-sol"
 model_reasoning_effort = "medium"
+```
+
+Merge these root keys into project `.codex/config.toml` or your personal config.
+Sol worker/tester, Luna explorer/researcher, and the Astra reviewer keep their
+installed settings. The skill follows the active configuration.
+
+This is an alternative for coding iterations; measure latency and quality on your
+tasks. For narrow routine edits, use the [Luna preset](routine-coding.md).
+
+If your active model and account advertise Fast mode, you can additionally set:
+
+```toml
 service_tier = "fast"
 ```
 
-If your Codex version does not support `service_tier`, remove that line and
-keep the model and reasoning settings.
+Fast mode trades increased usage for latency. It is optional, separate from model
+choice, and omitted from the bundled profiles. Remove the setting if unavailable.
+See the [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
