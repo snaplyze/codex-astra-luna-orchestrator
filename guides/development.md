@@ -37,6 +37,11 @@ Select an installed test engine explicitly with `CODEX_INSTALLER_TEST_ENGINE`
 portable executable of that engine. A requested unavailable engine must fail
 instead of silently skipping its suite.
 
+The harness clears inherited `PSModulePath` only in PowerShell test children, so
+each runtime loads its own built-in modules. Python launched from PowerShell 7
+otherwise passes incompatible module paths to Windows PowerShell 5.1, as described
+in [Microsoft's module-path guidance](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath#starting-windows-powershell-from-powershell-7).
+
 For example, on a Linux host with portable PowerShell:
 
 ```bash

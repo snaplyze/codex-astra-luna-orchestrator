@@ -333,8 +333,8 @@ unsupported assumptions about live model access and native platform success.
 - Ownership: installer worker owns setup.sh/setup.ps1/tests/test_installers.py;
   usage worker owns scripts/token_usage.py/tests/test_token_usage.py. Root owns
   CI, profile tests, docs, agent instructions and integration.
-- Next operation: commit installer/docs group, push the reviewed branch and
-  inspect all four native CI jobs.
+- Next operation: verify the Windows PowerShell child environment correction in
+  a fresh native CI run, then reconcile every finding and final verification state.
 - Root check after instruction/profile changes: Python3.13 unittest
   tests.test_profiles — 4 passed. Mutation check in a temporary profile copy
   detects a one-profile policy change. Existing model/effort/sandbox assertions pass.
@@ -431,3 +431,13 @@ unsupported assumptions about live model access and native platform success.
   and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_installers -v`
   — **31 passed** in a single full run. This does not substitute for native
   Windows tests. Independent installer reviewer has no unresolved finding.
+- Published `fix/audit-remediation` at `2ff98441668fe17390b32d17bdbd6708e0c2a84b`
+  after all local checks. Native CI [run 36238178006](https://github.com/snaplyze/codex-orchestrator/actions/runs/36238178006)
+  is queued/running; no success is claimed yet. Earlier "not pushed" checkpoints
+  describe their recorded time only. No release or tag was changed.
+- First native CI: Linux sh, macOS sh and Windows pwsh each passed 56 tests.
+  Windows PowerShell 5.1 failed because Python inherited PS7's PSModulePath and
+  Get-FileHash could not autoload. Microsoft documents this exact intermediate-
+  process failure and recommends removing PSModulePath from the child's env.
+  The test harness now does so for every PowerShell child; product code and
+  assertions remain unchanged. A new native run must confirm this correction.

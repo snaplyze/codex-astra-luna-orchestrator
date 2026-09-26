@@ -31,9 +31,6 @@ class InstallerIntegrationTests(unittest.TestCase):
         command = self.engine_command()
         if installer_path is not None:
             command[-1] = str(installer_path)
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
         return subprocess.run(
             command,
             cwd=ROOT,
@@ -42,7 +39,7 @@ class InstallerIntegrationTests(unittest.TestCase):
             text=True,
             check=False,
             timeout=30,
-            env=process_env,
+            env=self.engine_environment(env),
         )
 
     @classmethod
@@ -54,6 +51,14 @@ class InstallerIntegrationTests(unittest.TestCase):
     def is_shell_engine(self) -> bool:
         engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
         return engine == "sh" or (not engine and os.name != "nt")
+
+    def engine_environment(self, overrides: dict[str, str] | None = None) -> dict[str, str]:
+        environment = {**os.environ, **(overrides or {})}
+        if not self.is_shell_engine():
+            # Python launched by PS7 otherwise passes PS7-only modules to WinPS.
+            # Each test child must construct module paths for its own runtime.
+            environment = {key: value for key, value in environment.items() if key.upper() != "PSMODULEPATH"}
+        return environment
 
     def engine_command(self) -> list[str]:
         engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
@@ -78,6 +83,7 @@ class InstallerIntegrationTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=0,
+            env=self.engine_environment(),
         )
         assert process.stdin is not None and process.stdout is not None
         output: Queue[str] = Queue()
@@ -203,6 +209,7 @@ class InstallerIntegrationTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=0,
+                env=self.engine_environment(),
             )
             self.assertIsNotNone(process.stdin)
             self.assertIsNotNone(process.stdout)
