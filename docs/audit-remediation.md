@@ -8,6 +8,13 @@ This is the single execution record for the engineering audit of HEAD
 accepted; the conditional USG-06 finding is accepted as a reconciliation/diagnostic
 task, not as proof that every real log loses tokens.
 
+**Current status: complete.** All 17 findings are verified in the
+[per-finding outcome table](#per-finding-outcome), which owns their current
+statuses and verification evidence. The registry below preserves the original
+problems and acceptance criteria. [Validation limits](#validation-limits)
+record checks and guarantees outside that acceptance; they are not claimed as
+passed.
+
 The external audit is not required to continue: evidence, decisions, acceptance,
 dependencies and verification are recorded here. Do not expand this work to
 unrelated roadmap items, change model routing, add paid live benchmarks, rewrite
@@ -69,8 +76,9 @@ passed both jobs. These results describe the baseline, not future edits.
 
 ## Finding registry
 
-Status vocabulary: planned, in progress, implemented / verification pending,
-verified, externally blocked, proved inapplicable. Every item starts **planned**.
+These entries describe the audit baseline and the accepted remediation. Their
+final statuses are recorded in the [outcome table](#per-finding-outcome); they
+are not a queue of pending work.
 
 ### INS-01 — hardlinks escape target write boundaries (P2; defect)
 
@@ -314,7 +322,8 @@ Implementation branch: `fix/audit-remediation`, based on clean `main` at
 changes. Reviewed code and tests are published at
 `02b8988d0fd0192c26ab2597922f04099f4d5554`; the final documentation commit records
 this reconciliation, README layout and Unreleased changelog without changing code.
-No release, tag, main branch or production state was changed by this remediation.
+That remediation stage ended before the authorized release and merge into main;
+publication and branch cleanup are recorded below.
 
 ### Per-finding outcome
 
@@ -420,7 +429,7 @@ were used.
   reviewed branch and native CI only. Publication was not inferred from agent
   delegation. Commits are ordinary, with no history rewriting.
 
-### Remaining limits and next operation
+### Validation limits
 
 No audit finding remains open. Directory scanning cannot prove every rollout
 exists, cumulative mismatches cannot establish an unobserved model attribution,
@@ -434,8 +443,15 @@ race. Account model access, fresh live Codex role/skill discovery and paid
 quality benchmarks were not run; the documented smoke procedure and benchmark
 protocol keep those separate from static/native installer checks.
 
-The audit goal is complete. Subsequent user instructions authorize a v0.3.1
-release from main and deletion of merged working branches. The release uses the
-versioned CHANGELOG.md section as its notes source; this follow-up does not reopen
-the audit or add implementation scope. Use current Git, release and native goal
-state when resuming; do not create a duplicate audit goal.
+### Release and cleanup — complete
+
+The audit goal is complete. Under subsequent user authorization,
+[v0.3.1](https://github.com/snaplyze/codex-orchestrator/releases/tag/v0.3.1)
+was published from main at `e59b3b47e276736cb30ca078183388564cdd967e`.
+CI passed for both
+[main](https://github.com/snaplyze/codex-orchestrator/actions/runs/36239127982)
+and the [tag](https://github.com/snaplyze/codex-orchestrator/actions/runs/36239128047).
+The release notes match the versioned CHANGELOG.md section. The merged working
+branch was deleted locally and on GitHub; only main remains. This follow-up did
+not reopen the audit or add implementation scope. Use current Git, release and
+native goal state when resuming; do not create a duplicate audit goal.
