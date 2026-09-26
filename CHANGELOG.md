@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Replace managed files through staging and journal rollback per path; preserve
+  hardlinked external files and concurrent user work, with conflict recovery copies.
+- Keep maintainer instructions out of fresh project installations and carry task
+  authority explicitly through delegation briefs and role instructions.
+- Report usage scan scope, malformed-input diagnostics, quota windows and rollout
+  segments without treating observed tokens as a complete bill.
+- Verify Linux, macOS, PowerShell 7 and Windows PowerShell 5.1 with explicit test
+  engines; enforce identical shared skill policy across profiles.
+- Add the audit execution record and development guide; clarify benchmark quality,
+  source-state and cache controls. Model routing and permissions are unchanged.
+
 ## 0.3.0 — 2026-09-26
 
 - Rename the project and repository to Codex Orchestrator at

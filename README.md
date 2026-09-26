@@ -29,6 +29,7 @@ These are project presets, not model access restrictions imposed by your subscri
 │   │   └── agents/          (skills/codex-orchestrator/SKILL.md)
 │   └── plus-max-2-subagents/ (same Plus settings, max 2 concurrent threads)
 ├── guides/
+│   ├── development.md
 │   ├── migration.md
 │   ├── model-selection.md
 │   ├── fast-iteration.md
@@ -37,6 +38,8 @@ These are project presets, not model access restrictions imposed by your subscri
 │   ├── full-orchestration.md
 │   ├── plus-plan.md
 │   └── token-usage.md
+├── docs/
+│   └── audit-remediation.md
 ├── scripts/
 │   └── token_usage.py
 ├── AGENTS.md

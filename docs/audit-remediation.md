@@ -38,7 +38,7 @@ this execution record first.
 
 Goal mechanism: native `create_goal/get_goal/update_goal` is available; initial
 `get_goal` returned no active goal. Activation must follow the documentation gate.
-Goal ID/status: **active**, thread ID
+Activated goal identifier (thread ID):
 `01a0dd09-2476-74b0-a945-b7ce6b954541` (the native tool returns a thread ID,
 not a separate goal ID). Activation confirmed by create_goal after D0.
 
@@ -276,11 +276,11 @@ verified, externally blocked, proved inapplicable. Every item starts **planned**
 - [x] G0 Activate the native goal; save returned status/identifier here.
 - [x] I1 Implement INS-01/02 and installer half of AGT-01 with regression tests.
 - [x] U1 Implement USG-01..08 with explicit scope, diagnostics and segment semantics.
-- [ ] Q1 Implement QA-01/02 and MAINT-01; verify supported runtime documentation.
+- [x] Q1 Implement QA-01/02 and MAINT-01; verify supported runtime documentation.
 - [x] A1 Complete AGT-01/02, test client/source instruction separation.
 - [x] D1 Synchronize final README/guides with actual behavior and PLAN-01/DOC-01.
-- [ ] V1 Independent review, focused regressions, full checks and docs gate.
-- [ ] R1 Reconcile every ID; obtain required external runner evidence if missing;
+- [x] V1 Independent review, focused regressions, full checks and docs gate.
+- [x] R1 Reconcile every ID; obtain required external runner evidence if missing;
   only then mark applicable items and goal complete.
 
 I1 and U1 may run concurrently with disjoint file ownership after G0.
@@ -301,143 +301,140 @@ rollback failure/recovery retention; legacy skill archive conflicts; malformed
 usage values and disappearing files; cross-day scope; repeated stable thread IDs;
 unsupported assumptions about live model access and native platform success.
 
-## Execution checkpoint
+## Execution checkpoint — final reconciliation
 
-### Current per-finding status
+All **17 findings are implemented and verified**. No numbered finding is deferred,
+blocked or closed merely by documentation. The native goal was activated after
+the documentation gate; its lifecycle remains active at this saved checkpoint
+until the final branch/clean-tree check and native completion call.
 
-| IDs | Status | Evidence / next check |
+Implementation branch: `fix/audit-remediation`, based on clean `main` at
+`2eb8173211a90eb45335617839f9d5a5b5e9497d`. There were no pre-existing user
+changes. Reviewed code and tests are published at
+`02b8988d0fd0192c26ab2597922f04099f4d5554`; the final documentation commit records
+this reconciliation, README layout and Unreleased changelog without changing code.
+No release, tag, main branch or production state was changed by this remediation.
+
+### Per-finding outcome
+
+| ID | Result | Verification evidence |
 |---|---|---|
-| INS-01/02 | implemented / native verification pending | full sh suite and independent link/hardlink probes pass; portable PowerShell and native CI follow |
-| USG-01..08 | verified | 21 usage tests pass; independent review plus final malformed-type regression; integrated suite still pending |
-| QA-01 | in progress | four native matrix entries configured; harness and native execution pending |
-| QA-02 | implemented / verification pending | checkout v7.0.1 + setup-python v7.0.0 commit pins verified against official action.yml: node24; native run pending |
-| AGT-01 | verified | source fallback documented; managed-only new install, CRLF/idempotence and stale prompt regression pass |
-| AGT-02 | verified | independent read-only reviewer resolved audit-only/authorized-commit/local-fix scenarios correctly; all role settings unchanged; profile tests pass |
-| PLAN-01, DOC-01 | verified | benchmark acceptance/source-state/cache controls and corrected cost claim reviewed against implementation and audit |
-| MAINT-01 | verified | 4 profile tests pass; isolated one-profile mutation yields exactly 1 expected assertion failure |
+| INS-01 | Verified | Config and AGENTS hardlink regressions pass on all four native jobs; independent cancellation probe preserves the external sentinel and 0600 mode. |
+| INS-02 | Verified | Concurrent managed/unrelated edits and deletions, failed writes/restores, archive conflicts and link substitutions preserve user data or retain actionable recovery copies. All native installer suites pass. |
+| USG-01 | Verified | Rate-only first/last events report 10%→30% while response usage stays 100. |
+| USG-02 | Verified | Cross-day fixture reports explicit date-filtered partial scope; unfiltered observed usage is 300. JSON retains unknown directory coverage. |
+| USG-03 | Verified | Corrupt identities, timestamps, nested fields, record types, non-finite values, UTF-8 and disappearing files are diagnosed without losing following valid usage. |
+| USG-04 | Verified | Legacy root fallback covers non-CLI sources while child/guardian source identity keeps precedence. |
+| USG-05 | Verified | Padded/unpadded dates select the same files; invalid and oversized dates produce CLI errors. |
+| USG-06 | Verified | Mixed totals and component-only disagreements emit diagnostics, preserve cumulative evidence and never add both accounting sources. |
+| USG-07 | Verified | Real window durations and changed reset/limit identities are visible; multi-segment quota summaries identify their selected root segment. |
+| USG-08 | Verified | Stable-thread fixture counts 2 threads/1 child across 3 segments, retaining 600 tokens; list, JSON and Markdown agree. |
+| QA-01 | Verified | 56 tests pass on Linux sh, macOS sh, Windows pwsh and Windows PowerShell 5.1, with zero skipped tests. Native Codex discovery smoke is documented separately. |
+| QA-02 | Verified | Reviewed Node24 action pins, actionlint and all native jobs pass; logs contain no forced/deprecated Node20 notice. |
+| AGT-01 | Verified | Maintainer fallback resolves the bundled skill; fresh installs receive only managed client instructions. Existing text/CRLF/idempotence and prompt-time edits are covered. |
+| AGT-02 | Verified | Independent instruction review covers audit-only, authorized commit and unauthorized publish scenarios. Models, efforts, sandbox settings and existing authority remain unchanged. |
+| PLAN-01 | Verified | Reviewed protocol specifies acceptance, exact source revision, isolated trials, cache assumptions, outcomes, repeats and successful-run comparison. No paid benchmark was required. |
+| DOC-01 | Verified | Cache fraction is retained as an observation; unsupported monetary multiplier removed. API pricing and subscription allowance are distinguished. |
+| MAINT-01 | Verified | Four profile tests pass; isolated one-profile mutation produces exactly one expected equality assertion failure. |
 
-- Current stage: native goal active; U1 implemented and verified locally.
-  Installer review corrections finished; integrated sh and portable PowerShell
-  suites passed. Native CI follows the complete local check.
-- Baseline confirmed unchanged from audit: main at 2eb8173, clean tree.
-- Implementation branch: `fix/audit-remediation`, created from that baseline;
-  no pre-existing user changes or other branches were modified.
-- Scope: all 17 findings accepted as above; no unrelated deferred roadmap included.
-- Documentation fact/plan separation: limitations describe baseline; this registry
-  specifies intended changes, not completed guarantees.
-- Documentation updated: README, AGENTS, migration/token guides, this plan and
-  development guide. All 17 IDs have evidence, decisions, dependencies, acceptance
-  and checks. PLAN-01/DOC-01 text is implemented; final consistency check pending.
-- At the completed documentation gate only Markdown had changed; link checker
-  passed 28 links in 12 files. Implementation started only after goal activation.
-- Ownership: installer worker owns setup.sh/setup.ps1/tests/test_installers.py;
-  usage worker owns scripts/token_usage.py/tests/test_token_usage.py. Root owns
-  CI, profile tests, docs, agent instructions and integration.
-- Next operation: verify the Windows PowerShell child environment correction in
-  a fresh native CI run, then reconcile every finding and final verification state.
-- Root check after instruction/profile changes: Python3.13 unittest
-  tests.test_profiles — 4 passed. Mutation check in a temporary profile copy
-  detects a one-profile policy change. Existing model/effort/sandbox assertions pass.
-- Workflow sources: official checkout v7.0.1 commit
-  3d3c42e5aac5ba805825da76410c181273ba90b1 and setup-python v7.0.0 commit
-  5fda3b95a4ea91299a34e894583c3862153e4b97; both declare node24. Python3.12 and
-  contents:read retained; checkout credential persistence disabled.
-- Independent rules/CI review: no material findings; three authority scenarios
-  evaluated at instruction level, not as live model benchmarks. Transitional
-  baseline caveats in README/migration/token docs must be replaced after workers'
-  implementations pass. No model settings or sandbox permissions were changed.
-- Workflow validation: actionlint 1.7.12 passed after replacing unsupported
-  matrix expressions in step shell with explicit pwsh/powershell parser steps.
-  YAML parsing confirms all four OS/engine entries and contents:read.
-- Latest docs link check: 28 links in 16 Markdown files, 0 broken. Advisory prose
-  lint flags existing/technical semicolons and long sentences; no blocking docs
-  gate is configured. No diagrams were added or changed.
-- Installer design accepted: per-path before/installed images, safe entry
-  replacement, conflict-aware rollback, empty-only created-directory removal and
-  separately journaled legacy move. No whole-component restore fallback.
-- Usage independent review found acceptance gaps during implementation: malformed
-  IDs in --list, malformed accounting payloads silently skipped, non-CLI legacy
-  root classification, oversized date overflow, and component-only cumulative
-  mismatches. Parent additionally flagged top-level limit_id handling, dropped
-  list diagnostics and non-finite metadata export. These remain in USG-03/04/05/06/07,
-  with focused regressions assigned to the usage owner; no extra roadmap scope.
-- Usage docs now describe the implemented output contract: explicit scan scope,
-  per-segment rows, unique thread counts, diagnostics and cumulative evidence.
-  Final usage tests/review subsequently passed, as recorded below.
-- Installer review is exercising managed deletions, permission edits, symlink/
-  reparse substitutions and created-directory rollback. A Windows-only .NET
-  compatibility issue was identified before native CI: GetUnixFileMode exists
-  on modern runtimes but is unsupported on Windows, so OS gating is required
-  ([Microsoft API](https://learn.microsoft.com/en-us/dotnet/api/system.io.file.getunixfilemode)).
-  All corrections remain within INS-01/02 and QA-01 acceptance.
-- AGENTS prompt-race regression added to installer scope: outside-block user
-  text can change while confirmation waits. Re-read/revalidate or abort on that
-  change, preserving user bytes; do not write a stale pre-confirmation snapshot.
-- Additional local instruction validation: installed PyYAML parsed all 4 skill
-  frontmatters; tomllib parsed all 20 role files and their required text fields.
-  The optional plugin linter's missing frontmatter package was not added as a
-  project dependency; structural checks and independent semantic review are
-  recorded separately from that unavailable tool.
-- Usage final check: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
-  tests.test_token_usage -v` — 21 passed. Independent review found one final
-  unvalidated record-type crash; the parent added list/dict type fixtures,
-  observed the failure, validated type before dispatch and reran all 21 tests.
-  This result applies to the uncommitted implementation on fix/audit-remediation.
-  No private rollout logs or paid model calls were used.
-- Root quota reporting intentionally identifies one rollout segment rather than
-  inventing chronology across reverts; JSON retains each segment's snapshots.
-- Installer independent review found legacy-move rollback and empty-directory
-  cleanup still followed a swapped ancestor link. Both engines are being guarded
-  at those remaining mutation points. Three old failure-injection tests must be
-  adapted to the new staging path; failures are not counted as passes.
-- Final rules/docs review found one exit-status wording mismatch: zero --root
-  matches returns 2, not 1. The guide now matches that behavior. The reviewer
-  found no other material issue in its scope; model/effort/sandbox settings stay
-  unchanged. Root checked CLI --help and all 29 then-existing local links.
-- README and migration now describe per-file staging, conflict preservation,
-  retained before/after copies and recovery limits. Installer native acceptance
-  remains pending. The review requires actual write/restore fault injection in
-  addition to cancellation tests; replacing those tests with EOF alone is not
-  accepted. Root requested restoration of that coverage before integration.
-- Publishing authority: the user's earlier explicit instruction to push after
-  review is used only after reviewed local checks, for fix/audit-remediation and
-  its native CI. No new release, tag deletion, production change or paid model
-  benchmark is included. The earlier audit-only phase has ended with the user's
-  explicit remediation request.
-- Reviewed local commits: `5176f4c` implements usage reporting/tests/guide;
-  `5d2c37a` implements delegation authority, policy invariant and native CI matrix.
-  Installer and final integration docs remain uncommitted until their checks pass.
-  No branch has been pushed during this remediation checkpoint.
-- Root integrated sh verification: `TMPDIR=/home/snaplyze/.cache/codex-orchestrator-audit-tools/test-tmp
-  CODEX_INSTALLER_TEST_ENGINE=sh PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
-  discover -v` — **56 passed** (31 installer, 4 profile, 21 usage). This is
-  HEAD 5d2c37a plus the reviewed uncommitted installer/docs changes. Temporary
-  helpers use an executable filesystem because this host's /tmp is noexec.
-- `sh -n setup.sh`, `shellcheck setup.sh`, PowerShell 7.6.6 Language.Parser and
-  `git diff --check` passed. Final relative Markdown check: 30 links across
-  17 files, zero broken paths/anchors. Actionlint 1.7.12 already passed the
-  unchanged workflow. No new project dependencies were added.
-- Independent installer review now reports no remaining implementation defect:
-  both engines pass legacy rollback/empty-directory link substitution, .codex
-  ancestor substitution and target-root substitution probes. Config hardlink
-  rollback preserves the external file and 0600 mode. The actual write/restore
-  fault tests include injection markers and retained before-image assertions.
-- Recovery entries now use `manifest.txt` in both installers: normalized relative
-  path on line one, `existing` or `new` on line two. Manifest and before/after
-  copies remain available after restoration conflicts/failures.
-- Root portable PowerShell verification: the same executable TMPDIR with
-  `CODEX_INSTALLER_TEST_ENGINE=pwsh`,
-  `CODEX_INSTALLER_TEST_EXECUTABLE=/home/snaplyze/.cache/codex-orchestrator-pwsh-7.6.6/pwsh`
-  and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_installers -v`
-  — **31 passed** in a single full run. This does not substitute for native
-  Windows tests. Independent installer reviewer has no unresolved finding.
-- Published `fix/audit-remediation` at `2ff98441668fe17390b32d17bdbd6708e0c2a84b`
-  after all local checks. Native CI [run 36238178006](https://github.com/snaplyze/codex-orchestrator/actions/runs/36238178006)
-  is queued/running; no success is claimed yet. Earlier "not pushed" checkpoints
-  describe their recorded time only. No release or tag was changed.
-- First native CI: Linux sh, macOS sh and Windows pwsh each passed 56 tests.
-  Windows PowerShell 5.1 failed because Python inherited PS7's PSModulePath and
-  Get-FileHash could not autoload. Microsoft documents this exact intermediate-
-  process failure and recommends removing PSModulePath from the child's env.
-  The test harness now does so for every PowerShell child; product code and
-  assertions remain unchanged. A new native run must confirm this correction.
+### Checks and revisions
+
+[Successful native CI run 36238401247](https://github.com/snaplyze/codex-orchestrator/actions/runs/36238401247)
+tested `02b8988d0fd0192c26ab2597922f04099f4d5554` with Python 3.12:
+
+| Native job | Result |
+|---|---|
+| Ubuntu / sh | 56 passed, 0 skipped; shell syntax and ShellCheck passed |
+| macOS / sh | 56 passed, 0 skipped; shell syntax passed |
+| Windows / pwsh | 56 passed, 0 skipped; PowerShell parser passed |
+| Windows / powershell | 56 passed, 0 skipped; Windows PowerShell parser passed |
+
+Local Linux checks on the same implementation (before the isolated test-env
+correction) used Python 3.13 and portable PowerShell 7.6.6:
+
+```bash
+TMPDIR=/home/snaplyze/.cache/codex-orchestrator-audit-tools/test-tmp \
+CODEX_INSTALLER_TEST_ENGINE=sh PYTHONDONTWRITEBYTECODE=1 \
+python3 -m unittest discover -v
+# 56 passed
+
+TMPDIR=/home/snaplyze/.cache/codex-orchestrator-audit-tools/test-tmp \
+CODEX_INSTALLER_TEST_ENGINE=pwsh \
+CODEX_INSTALLER_TEST_EXECUTABLE=/home/snaplyze/.cache/codex-orchestrator-pwsh-7.6.6/pwsh \
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_installers -v
+# 31 passed
+
+sh -n setup.sh
+shellcheck setup.sh
+git diff --check
+# All passed
+```
+
+The explicit temporary directory is private and executable; this host's /tmp is
+noexec. The development guide gives portable commands without this machine's
+paths. PowerShell Language.Parser reported no parse errors. Actionlint 1.7.12
+passed the workflow. A relative path/anchor check passed all 30 local links in
+17 Markdown files. PyYAML parsed four skill headers and tomllib parsed 20 roles.
+The optional instruction linter lacked its frontmatter package; no project
+dependency was added for it. Structural checks, policy invariant tests and
+independent semantic review provide the recorded instruction evidence.
+
+Three focused PowerShell tests covering all child-launch paths passed after the
+test-environment correction; the native run above then passed the full suite.
+All four native job logs were inspected for test summaries, skipped tests and
+the former forced-Node20 warning. No private session logs or model API calls
+were used.
+
+### Decisions and review closure
+
+- Documentation gate came first: README, AGENTS, migration/token guides, this
+  registry and development guide were updated before any implementation, test,
+  TOML or CI edit. All 17 IDs had acceptance and dependencies. Only then was the
+  native goal activated and confirmed.
+- Installer and usage work had disjoint worker ownership; root owned docs, rules,
+  CI and integration. Independent reviewers examined installer safety, usage
+  boundaries and instruction/CI consistency. All material findings were fixed.
+- Review-driven regressions include stale AGENTS confirmation snapshots, deleted
+  managed outputs, link substitutions during rollback and malformed JSON record
+  types. The last parser failure was observed before its fix, then all 21 usage
+  tests passed.
+- Real installer I/O faults are injected by shell mv and PowerShell Copy-Item
+  proxies. Marker assertions prove injection happened; they were not replaced by
+  cancellation-only coverage. Recovery entries use `manifest.txt` (normalized
+  relative path, then existing/new) plus before/after copies.
+- First native [run 36238178006](https://github.com/snaplyze/codex-orchestrator/actions/runs/36238178006)
+  passed Linux, macOS and Windows PS7 but failed PS5.1: Python inherited PS7's
+  module paths and Get-FileHash could not autoload. Following
+  [Microsoft's documented remedy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath#starting-windows-powershell-from-powershell-7),
+  the harness now removes PSModulePath only from PowerShell test children.
+  The installer and assertions were unchanged; independent review confirmed all
+  three launch sites and preservation of other environment settings.
+- checkout v7.0.1 is pinned to `3d3c42e5aac5ba805825da76410c181273ba90b1`;
+  setup-python v7.0.0 to `5fda3b95a4ea91299a34e894583c3862153e4b97`.
+  First-party action metadata declares node24. Python3.12 and contents:read are
+  retained; checkout credential persistence is disabled.
+- Shared skills remain identical without a generator; no new runtime or project
+  dependency, model-routing change or permission expansion was introduced.
+- The earlier explicit user authorization to push after review was used for this
+  reviewed branch and native CI only. Publication was not inferred from agent
+  delegation. Commits are ordinary, with no history rewriting.
+
+### Remaining limits and next operation
+
+No audit finding remains open. Directory scanning cannot prove every rollout
+exists, cumulative mismatches cannot establish an unobserved model attribution,
+and quota snapshots cannot establish billed cost. Those are explicit output
+contracts, not silently failed acceptance.
+
+Native runner tests do not certify every filesystem ACL/junction policy or every
+Windows/macOS version. Transaction checks cover normal failure and detected
+concurrent changes, not forced-kill/power-loss recovery or a hostile filesystem
+race. Account model access, fresh live Codex role/skill discovery and paid
+quality benchmarks were not run; the documented smoke procedure and benchmark
+protocol keep those separate from static/native installer checks.
+
+Finalization/resume rule: publish this documentation record if it is still local,
+check the final branch/CI state, and close the existing native goal if it remains
+active. If those steps have already completed, there is no remaining audit work.
+Use current Git and native goal state to distinguish them; do not start a new
+audit or goal.
