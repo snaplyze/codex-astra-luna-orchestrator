@@ -1,9 +1,9 @@
 ---
-name: astra-orchestrator
+name: codex-orchestrator
 description: Coordinate Codex work that benefits from bounded delegation, independent research or review, or parallel workstreams. Use for cross-component changes and explicit subagent requests; keep small localized tasks in the root.
 ---
 
-# Adaptive Codex Orchestration
+# Codex Orchestrator
 
 <!-- Modified for this distribution: GPT-6 routing and bounded delegation. -->
 

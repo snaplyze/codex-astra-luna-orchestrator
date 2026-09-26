@@ -171,7 +171,7 @@ In rough order of impact:
   ```
 
 - Do not orchestrate small tasks. The skill's delegation gate already says
-  this; enforce it by not invoking `$astra-orchestrator` for one-file edits.
+  this; enforce it by not invoking `$codex-orchestrator` for one-file edits.
 - Keep `max_concurrent_threads_per_session` low. Each extra concurrent
   subagent is a second full context being re-read on every response.
 - Ask subagents for short reports. Raw logs pasted into the root are re-read by the

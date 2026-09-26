@@ -11,8 +11,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_SH = ROOT / "setup.sh"
 SETUP_PS1 = ROOT / "setup.ps1"
-MANAGED_BEGIN = "<!-- BEGIN codex-astra-luna-orchestrator:managed -->"
-MANAGED_END = "<!-- END codex-astra-luna-orchestrator:managed -->"
+MANAGED_BEGIN = "<!-- BEGIN codex-orchestrator:managed -->"
+MANAGED_END = "<!-- END codex-orchestrator:managed -->"
+LEGACY_MANAGED_BEGIN = "<!-- BEGIN codex-astra-luna-orchestrator:managed -->"
+LEGACY_MANAGED_END = "<!-- END codex-astra-luna-orchestrator:managed -->"
 
 
 class InstallerIntegrationTests(unittest.TestCase):
@@ -58,7 +60,7 @@ class InstallerIntegrationTests(unittest.TestCase):
 
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
                     self.assertTrue((target / ".codex" / "config.toml").is_file())
-                    self.assertTrue((target / ".agents" / "skills" / "astra-orchestrator" / "SKILL.md").is_file())
+                    self.assertTrue((target / ".agents" / "skills" / "codex-orchestrator" / "SKILL.md").is_file())
                     config = (target / ".codex" / "config.toml").read_text()
                     self.assertIn("max_concurrent_threads_per_session = 2", config)
                     self.assertIn(f'model = "{model}"', config)
@@ -112,12 +114,24 @@ class InstallerIntegrationTests(unittest.TestCase):
                         content = content.replace("gpt-6-luna", "gpt-5.6-luna")
                         content = content.replace('model_reasoning_effort = "high"', 'model_reasoning_effort = "medium"')
                         path.write_text(content)
-                    (agents / "skills" / "astra-orchestrator" / "SKILL.md").write_text("stale skill\n")
+                    legacy_skill_dir = agents / "skills" / "codex-orchestrator"
+                    legacy_skill_dir.rename(agents / "skills" / "astra-orchestrator")
+                    (agents / "skills" / "astra-orchestrator" / "SKILL.md").write_text("custom legacy skill\n")
                     (codex / "user-owned.toml").write_text("user-owned codex\n")
                     (agents / "user-owned.txt").write_text("user-owned agents\n")
                     (target / "keep.txt").write_text("keep\n")
 
-                    result = self.run_installer(target, [selection, "y", "y", "y", "y", "y"])
+                    agents_file = target / "AGENTS.md"
+                    shutil.copy(ROOT / "AGENTS.md", agents_file)
+                    legacy_instructions = (
+                        agents_file.read_text()
+                        .replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                        .replace(MANAGED_END, LEGACY_MANAGED_END)
+                        .replace("codex-orchestrator", "astra-orchestrator")
+                    )
+                    agents_file.write_bytes(legacy_instructions.replace("\n", "\r\n").encode())
+
+                    result = self.run_installer(target, [selection, "y", "y", "y", "y", "y", "y"])
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
                     profile = ROOT / "profiles" / profile_name
@@ -134,6 +148,15 @@ class InstallerIntegrationTests(unittest.TestCase):
                             )
                     self.assertEqual((codex / "user-owned.toml").read_text(), "user-owned codex\n")
                     self.assertEqual((agents / "user-owned.txt").read_text(), "user-owned agents\n")
+                    archived = agents / "migration-backups" / "astra-orchestrator" / "SKILL.md"
+                    self.assertEqual(archived.read_text(), "custom legacy skill\n")
+                    self.assertFalse((agents / "skills" / "astra-orchestrator").exists())
+                    migrated_agents = agents_file.read_bytes()
+                    self.assertIn(MANAGED_BEGIN.encode(), migrated_agents)
+                    self.assertNotIn(b"\n", migrated_agents.replace(b"\r\n", b""))
+                    repeated = self.run_installer(target, [selection, "n", "n", "y"])
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr + repeated.stdout)
+                    self.assertEqual(agents_file.read_bytes(), migrated_agents)
                     self.assertEqual((target / "keep.txt").read_text(), "keep\n")
 
     def test_invalid_profile_does_not_touch_target(self) -> None:
@@ -184,6 +207,171 @@ class InstallerIntegrationTests(unittest.TestCase):
             self.assertFalse((target / ".codex").exists())
             self.assertFalse((target / ".agents").exists())
 
+    def test_legacy_skill_migration_and_instruction_update_can_be_declined_independently(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            agents_dir = target / ".agents"
+            shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+            (agents_dir / "skills" / "codex-orchestrator").rename(
+                agents_dir / "skills" / "astra-orchestrator"
+            )
+            legacy_skill = agents_dir / "skills" / "astra-orchestrator" / "SKILL.md"
+            legacy_skill.write_text("custom legacy skill\n")
+            agents_file = target / "AGENTS.md"
+            agents_file.write_text(
+                (ROOT / "AGENTS.md").read_text()
+                .replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                .replace(MANAGED_END, LEGACY_MANAGED_END)
+                .replace("codex-orchestrator", "astra-orchestrator")
+            )
+            original_agents = agents_file.read_bytes()
+            original_skill = legacy_skill.read_bytes()
+
+            result = self.run_installer(target, ["1", "n", "y", "n", "y", "n"])
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(agents_file.read_bytes(), original_agents)
+            self.assertEqual(legacy_skill.read_bytes(), original_skill)
+            self.assertFalse((agents_dir / "migration-backups").exists())
+            self.assertFalse((agents_dir / "skills" / "codex-orchestrator").exists())
+
+    def test_skill_archive_collision_uses_numeric_suffix_and_warns_if_agents_declined(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            agents_dir = target / ".agents"
+            shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+            (agents_dir / "skills" / "codex-orchestrator").rename(
+                agents_dir / "skills" / "astra-orchestrator"
+            )
+            legacy_skill = agents_dir / "skills" / "astra-orchestrator" / "SKILL.md"
+            legacy_skill.write_text("custom legacy skill\n")
+            occupied_archive = agents_dir / "migration-backups" / "astra-orchestrator"
+            occupied_archive.mkdir(parents=True)
+            (occupied_archive / "keep.txt").write_text("existing archive\n")
+            agents_file = target / "AGENTS.md"
+            agents_file.write_text(
+                (ROOT / "AGENTS.md").read_text()
+                .replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                .replace(MANAGED_END, LEGACY_MANAGED_END)
+                .replace("codex-orchestrator", "astra-orchestrator")
+            )
+
+            result = self.run_installer(target, ["1", "n", "y", "y", "y", "n"])
+            output = result.stdout + result.stderr
+
+            self.assertEqual(result.returncode, 0, output)
+            archived = agents_dir / "migration-backups" / "astra-orchestrator.1" / "SKILL.md"
+            self.assertEqual(archived.read_text(), "custom legacy skill\n")
+            self.assertEqual((occupied_archive / "keep.txt").read_text(), "existing archive\n")
+            self.assertFalse((agents_dir / "skills" / "astra-orchestrator").exists())
+            self.assertIn("legacy", output.lower())
+            self.assertIn("AGENTS.md", output)
+            self.assertIn("astra-orchestrator.1", output)
+
+    def test_agents_can_migrate_while_declined_skill_update_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            agents_dir = target / ".agents"
+            shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+            (agents_dir / "skills" / "codex-orchestrator").rename(
+                agents_dir / "skills" / "astra-orchestrator"
+            )
+            agents_file = target / "AGENTS.md"
+            agents_file.write_text(
+                (ROOT / "AGENTS.md").read_text()
+                .replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                .replace(MANAGED_END, LEGACY_MANAGED_END)
+                .replace("codex-orchestrator", "astra-orchestrator")
+            )
+
+            result = self.run_installer(target, ["1", "n", "n", "y", "y"])
+            output = result.stdout + result.stderr
+
+            self.assertEqual(result.returncode, 0, output)
+            self.assertIn(MANAGED_BEGIN, agents_file.read_text())
+            self.assertTrue((agents_dir / "skills" / "astra-orchestrator" / "SKILL.md").is_file())
+            self.assertFalse((agents_dir / "skills" / "codex-orchestrator").exists())
+            self.assertIn("skill", output.lower())
+            self.assertIn(".agents", output)
+
+    def test_malformed_legacy_and_mixed_marker_pairs_fail_atomically(self) -> None:
+        malformed_contents = {
+            "mixed": f"{LEGACY_MANAGED_BEGIN}\nlegacy\n{MANAGED_END}\n",
+            "duplicate": (
+                f"{LEGACY_MANAGED_BEGIN}\none\n{LEGACY_MANAGED_END}\n"
+                f"{LEGACY_MANAGED_BEGIN}\ntwo\n{LEGACY_MANAGED_END}\n"
+            ),
+            "reversed": f"{LEGACY_MANAGED_END}\nlegacy\n{LEGACY_MANAGED_BEGIN}\n",
+        }
+        for case, original in malformed_contents.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+                target = self.make_target(directory)
+                agents_dir = target / ".agents"
+                shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+                (agents_dir / "skills" / "codex-orchestrator").rename(
+                    agents_dir / "skills" / "astra-orchestrator"
+                )
+                legacy_skill = agents_dir / "skills" / "astra-orchestrator" / "SKILL.md"
+                legacy_skill.write_text("legacy skill\n")
+                agents_file = target / "AGENTS.md"
+                agents_file.write_text(original)
+
+                result = self.run_installer(target, ["1", "n", "y", "y", "y"])
+
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(agents_file.read_text(), original)
+                self.assertEqual(legacy_skill.read_text(), "legacy skill\n")
+                self.assertFalse((agents_dir / "migration-backups").exists())
+                self.assertFalse((agents_dir / "skills" / "codex-orchestrator").exists())
+
+    @unittest.skipUnless(os.name != "nt", "shell failure-injection test is POSIX-only")
+    def test_failed_agents_update_rolls_back_archived_legacy_skill(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            agents_dir = target / ".agents"
+            shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+            (agents_dir / "skills" / "codex-orchestrator").rename(
+                agents_dir / "skills" / "astra-orchestrator"
+            )
+            legacy_skill = agents_dir / "skills" / "astra-orchestrator" / "SKILL.md"
+            legacy_skill.write_text("custom legacy skill\n")
+            original_agents = (ROOT / "AGENTS.md").read_text()
+            (target / "AGENTS.md").write_text(
+                original_agents
+                .replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                .replace(MANAGED_END, LEGACY_MANAGED_END)
+                .replace("codex-orchestrator", "astra-orchestrator")
+            )
+            original_agents = (target / "AGENTS.md").read_bytes()
+            original_tree = {
+                path.relative_to(agents_dir): path.read_bytes()
+                for path in agents_dir.rglob("*")
+                if path.is_file()
+            }
+            with tempfile.TemporaryDirectory(prefix=".codex fake bin ", dir=Path.home()) as fake_directory:
+                fake_bin = Path(fake_directory)
+                real_cp = shutil.which("cp")
+                self.assertIsNotNone(real_cp)
+                (fake_bin / "cp").write_text(
+                    "#!/bin/sh\n"
+                    "case \"$*\" in *agents-updated*) exit 42 ;; esac\n"
+                    f"exec {real_cp!s} \"$@\"\n"
+                )
+                (fake_bin / "cp").chmod(0o755)
+                env = {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
+
+                result = self.run_installer(target, ["1", "n", "y", "y", "y", "y"], env=env)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((target / "AGENTS.md").read_bytes(), original_agents)
+            restored_tree = {
+                path.relative_to(agents_dir): path.read_bytes()
+                for path in agents_dir.rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(restored_tree, original_tree)
+            self.assertFalse((agents_dir / "migration-backups").exists())
+
     def test_all_profiles_have_five_roles_and_expected_limits(self) -> None:
         expected_limits = {
             "pro": 4,
@@ -200,7 +388,7 @@ class InstallerIntegrationTests(unittest.TestCase):
                     expected_limit,
                 )
                 self.assertEqual(len(list((profile / "codex" / "agents").glob("*.toml"))), 5)
-                self.assertTrue((profile / "agents" / "skills" / "astra-orchestrator" / "SKILL.md").is_file())
+                self.assertTrue((profile / "agents" / "skills" / "codex-orchestrator" / "SKILL.md").is_file())
 
         for base_name in ("pro", "plus"):
             with self.subTest(profile_pair=base_name):
@@ -222,8 +410,8 @@ class InstallerIntegrationTests(unittest.TestCase):
                         (base / "codex" / "agents" / f"{role}.toml").read_bytes(),
                     )
                 self.assertEqual(
-                    (limited / "agents" / "skills" / "astra-orchestrator" / "SKILL.md").read_bytes(),
-                    (base / "agents" / "skills" / "astra-orchestrator" / "SKILL.md").read_bytes(),
+                    (limited / "agents" / "skills" / "codex-orchestrator" / "SKILL.md").read_bytes(),
+                    (base / "agents" / "skills" / "codex-orchestrator" / "SKILL.md").read_bytes(),
                 )
 
     def test_managed_agents_are_idempotent(self) -> None:

@@ -26,8 +26,9 @@ default_subagent_reasoning_effort = "high"
 ```
 
 Use `2` for the max-2 variant. Also copy the five role files to
-`~/.codex/agents/` and the skill to `~/.agents/skills/astra-orchestrator/`.
+`~/.codex/agents/` and the skill to `~/.agents/skills/codex-orchestrator/`.
 Merge global settings without replacing unrelated configuration.
+For existing installations, follow the [rename migration guide](migration.md).
 
 Explorer, worker, tester, and researcher pin `gpt-6-luna` at `high`.
 Reviewer pins `gpt-6-astra` at `low` with read-only defaults. The reviewer

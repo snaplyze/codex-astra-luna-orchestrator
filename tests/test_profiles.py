@@ -32,6 +32,18 @@ EXPECTED = {
 
 
 class ProfileTopologyTests(unittest.TestCase):
+    def test_profiles_ship_one_skill_with_matching_identity(self) -> None:
+        for profile in (ROOT / "profiles").iterdir():
+            with self.subTest(profile=profile.name):
+                skills = profile / "agents" / "skills"
+                skill_files = list(skills.glob("*/SKILL.md"))
+                self.assertEqual(
+                    [path.parent.name for path in skill_files],
+                    ["codex-orchestrator"],
+                )
+                frontmatter = skill_files[0].read_text().split("---", 2)[1]
+                self.assertIn("name: codex-orchestrator", frontmatter.splitlines())
+
     def test_all_role_files_have_exact_topology(self) -> None:
         for base_name, expected in EXPECTED.items():
             for profile_name in (base_name, f"{base_name}-max-2-subagents"):

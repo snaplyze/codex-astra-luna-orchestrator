@@ -41,8 +41,9 @@ Copy all five role files from the matching profile's `codex/agents/` too:
 | reviewer | `gpt-6-astra` | `low` | read-only |
 
 Named roles override the generic subagent defaults. Copy the matching
-`agents/skills/astra-orchestrator/` folder alongside configuration; the skill
+`agents/skills/codex-orchestrator/` folder alongside configuration; the skill
 reads effective settings so optional overrides do not require prose edits.
+For existing installations, follow the [rename migration guide](migration.md).
 
 See [model selection](model-selection.md) for rationale and availability, or
 [Plus](plus-plan.md) for the budget-oriented Luna-root profile.

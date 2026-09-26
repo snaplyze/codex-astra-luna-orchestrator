@@ -1,8 +1,11 @@
-# Codex Orchestration with Astra, Sol, and Luna
+# Codex Orchestrator
 
 <!-- Modified for this distribution: adaptive delegation guidance, setup URL, and maintainer details. -->
 
 A configurable Codex setup with four profiles: standard Pro and Plus profiles allow four concurrent subagent threads, while `pro-max-2-subagents` and `plus-max-2-subagents` cap concurrency at two. Pro uses GPT-6 Astra as root; Plus uses GPT-6 Luna as root.
+
+Repository: [snaplyze/codex-orchestrator](https://github.com/snaplyze/codex-orchestrator).
+For an existing installation, follow the [rename migration guide](guides/migration.md).
 
 The installer offers a quality-oriented Pro profile and a budget-oriented Plus profile. Pro uses Astra for coordination, Sol for implementation and testing, and Luna for exploration and research. Plus keeps coordination and execution on Luna. Both retain the independent Astra reviewer. Max-2 variants change only concurrency.
 
@@ -15,13 +18,14 @@ These are project presets, not model access restrictions imposed by your subscri
 ├── profiles/
 │   ├── pro/
 │   │   ├── codex/           (config.toml and agents/*.toml)
-│   │   └── agents/          (skills/astra-orchestrator/SKILL.md)
+│   │   └── agents/          (skills/codex-orchestrator/SKILL.md)
 │   ├── pro-max-2-subagents/  (same Pro settings, max 2 concurrent threads)
 │   ├── plus/
 │   │   ├── codex/           (config.toml and agents/*.toml)
-│   │   └── agents/          (skills/astra-orchestrator/SKILL.md)
+│   │   └── agents/          (skills/codex-orchestrator/SKILL.md)
 │   └── plus-max-2-subagents/ (same Plus settings, max 2 concurrent threads)
 ├── guides/
+│   ├── migration.md
 │   ├── model-selection.md
 │   ├── fast-iteration.md
 │   ├── complex-repo-work.md
@@ -89,7 +93,9 @@ Each role file pins its own model and effort. Changing only `default_subagent_mo
 
 The skill reads effective settings instead of duplicating model IDs and efforts. Session overrides and loaded role definitions remain authoritative until you start a new session.
 
-When updating an existing installation, rerun setup and approve updates to both `.codex` and `.agents`, or copy the config, all role files, and the skill together from the selected profile. Replace `<profile>` below with `pro`, `pro-max-2-subagents`, `plus`, or `plus-max-2-subagents`.
+When updating an existing installation, rerun setup and approve `.codex`, `.agents`, and managed `AGENTS.md` updates.
+For manual installation, copy the config, role files, skill, and managed instructions together from the selected profile.
+Replace `<profile>` below with `pro`, `pro-max-2-subagents`, `plus`, or `plus-max-2-subagents`.
 
 If you want all named roles, including the reviewer, to follow the `[agents]` defaults, remove both the `model` and `model_reasoning_effort` overrides from their role files.
 
@@ -98,8 +104,8 @@ If you want all named roles, including the reviewer, to follow the `[agents]` de
 Clone this repository:
 
 ```bash
-git clone https://github.com/snaplyze/codex-astra-luna-orchestrator.git
-cd codex-astra-luna-orchestrator
+git clone https://github.com/snaplyze/codex-orchestrator.git
+cd codex-orchestrator
 ```
 
 The target project must already exist and must be different from this setup
@@ -156,7 +162,7 @@ at low effort on all four profiles.
 The installer then asks whether to install each component:
 
 - `profiles/<plan>/codex` contains the root configuration and agent role profiles, installed as `.codex`.
-- `profiles/<plan>/agents` contains the `astra-orchestrator` skill, installed as `.agents`.
+- `profiles/<plan>/agents` contains the `codex-orchestrator` skill, installed as `.agents`.
 - `AGENTS.md` gives Codex the project-level orchestration instructions. If it
   already exists, setup asks separately before appending to an unmanaged file or
   updating an older managed block, and preserves the user-owned contents.
@@ -177,8 +183,10 @@ Update .codex? New files will be added; only paths listed above will be replaced
 ```
 
 Existing-file updates default to `n`. If approved, missing files are added and
-only the listed paths are replaced. Other files already present in the target
-component remain untouched. Component changes are backed up during the run and
+only the listed paths are replaced. When migrating an older installation, setup
+also lists and archives the legacy skill outside `skills` before installing its
+replacement. Other files already present in the target component remain untouched.
+Component changes are backed up during the run and
 rolled back if a later installation step fails. If you decline one or more
 components, setup completes but reports that the installation is partial.
 
@@ -198,10 +206,10 @@ For agents, copy the TOML files from `profiles/<plan>/codex/agents/` to:
 ~/.codex/agents/
 ```
 
-For the skill, copy `profiles/<plan>/agents/skills/astra-orchestrator/` to:
+For the skill, copy `profiles/<plan>/agents/skills/codex-orchestrator/` to:
 
 ```text
-~/.agents/skills/astra-orchestrator/
+~/.agents/skills/codex-orchestrator/
 ```
 
 Merge the settings from the matching profile, such as
@@ -215,6 +223,9 @@ Merge the settings from the matching profile, such as
 
 Do not blindly overwrite your existing global config if you already have MCP servers, providers, permissions, or other settings.
 
+For an existing global installation, also migrate the previous skill directory
+and its instruction references as described in the [migration guide](guides/migration.md#manual-or-global-installations).
+
 ## Using the skill
 
 Codex may select the skill automatically when the task matches its description.
@@ -222,13 +233,13 @@ Codex may select the skill automatically when the task matches its description.
 You can also invoke it explicitly from Codex CLI or the IDE extension with:
 
 ```text
-$astra-orchestrator
+$codex-orchestrator
 ```
 
 Example prompt:
 
 ```text
-$astra-orchestrator
+$codex-orchestrator
 
 Implement the new invoice export endpoint.
 Have explorer map the existing invoice/export path first.

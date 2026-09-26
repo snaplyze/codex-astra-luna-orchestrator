@@ -4,26 +4,24 @@ set -eu
 
 script_dir=$(CDPATH=; cd -- "$(dirname -- "$0")" && pwd -P)
 
-managed_begin='<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
-managed_end='<!-- END codex-astra-luna-orchestrator:managed -->'
+managed_begin='<!-- BEGIN codex-orchestrator:managed -->'
+managed_end='<!-- END codex-orchestrator:managed -->'
+legacy_managed_begin='<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
+legacy_managed_end='<!-- END codex-astra-luna-orchestrator:managed -->'
 transaction_root=
 managed_block_path=
 changed_components=
 transaction_committed=no
 transaction_preserved=no
+legacy_skill_archived=no
+legacy_archive_path=
+agents_instructions_canonical=no
 
 cat <<'BANNER'
-+---------------------------------------+
-|    _    ____ _____ ____      _        |
-|   / \  / ___|_   _|  _ \    / \       |
-|  / _ \ \___ \ | | | |_) |  / _ \      |
-| / ___ \ ___) || | |  _ <  / ___ \     |
-|/_/   \_\____/ |_| |_| \_\/_/   \_\    |
-|                                       |
-|       O R C H E S T R A T O R         |
-|   GPT-6 Astra/Luna/Sol profiles       |
-|      with role-specific routing       |
-+---------------------------------------+
++----------------------------+
+|      CODEX ORCHESTRATOR    |
+|  Astra, Luna, Sol profiles |
++----------------------------+
 BANNER
 printf '%s\n' 'Interactive project setup'
 printf '%s' 'Target repository path: '
@@ -122,7 +120,12 @@ begin_transaction() {
         printf '%s\n' 'Error: could not read setup source AGENTS.md.' >&2
         exit 1
     fi
-    if ! extract_managed_block "$source_agents_normalized" "$managed_block_path"; then
+    source_namespace=$(classify_managed_block "$source_agents_normalized") || {
+        printf '%s\n' 'Error: setup source AGENTS.md has an invalid managed block.' >&2
+        exit 1
+    }
+    if [ "$source_namespace" != canonical ] || \
+        ! extract_managed_block "$source_agents_normalized" "$managed_block_path" "$source_namespace"; then
         printf '%s\n' 'Error: setup source AGENTS.md has an invalid managed block.' >&2
         exit 1
     fi
@@ -158,7 +161,7 @@ validate_profile() {
         codex/agents/reviewer.toml \
         codex/agents/tester.toml \
         codex/agents/worker.toml \
-        agents/skills/astra-orchestrator/SKILL.md; do
+        agents/skills/codex-orchestrator/SKILL.md; do
         if [ ! -f "$profile_path/$relative_path" ] || [ -L "$profile_path/$relative_path" ]; then
             printf 'Error: selected profile is incomplete: %s\n' "$profile_path/$relative_path" >&2
             return 1
@@ -284,8 +287,16 @@ select_plan() {
 extract_managed_block() {
     source_path=$1
     output_path=$2
+    namespace=$3
+    if [ "$namespace" = legacy ]; then
+        begin_marker=$legacy_managed_begin
+        end_marker=$legacy_managed_end
+    else
+        begin_marker=$managed_begin
+        end_marker=$managed_end
+    fi
 
-    awk -v begin="$managed_begin" -v end="$managed_end" '
+    awk -v begin="$begin_marker" -v end="$end_marker" '
         BEGIN { begin_count = 0; end_count = 0; inside = 0 }
         $0 == begin {
             begin_count++
@@ -302,13 +313,77 @@ extract_managed_block() {
     ' "$source_path" > "$output_path"
 }
 
+classify_managed_block() {
+    source_path=$1
+    awk -v cb="$managed_begin" -v ce="$managed_end" \
+        -v lb="$legacy_managed_begin" -v le="$legacy_managed_end" '
+        $0 == cb { cbn++; cbi = NR }
+        $0 == ce { cen++; cei = NR }
+        $0 == lb { lbn++; lbi = NR }
+        $0 == le { len++; lei = NR }
+        END {
+            if (cbn == 0 && cen == 0 && lbn == 0 && len == 0) exit 2
+            if (cbn == 1 && cen == 1 && lbn == 0 && len == 0 && cbi < cei) {
+                print "canonical"; exit 0
+            }
+            if (lbn == 1 && len == 1 && cbn == 0 && cen == 0 && lbi < lei) {
+                print "legacy"; exit 0
+            }
+            exit 1
+        }
+    ' "$source_path"
+}
+
+prepare_legacy_skill_archive() {
+    legacy_skill_path=$target_dir/.agents/skills/astra-orchestrator
+    legacy_archive_path=
+    if [ ! -e "$legacy_skill_path" ] && [ ! -L "$legacy_skill_path" ]; then
+        return 0
+    fi
+    if [ -L "$legacy_skill_path" ] || [ ! -d "$legacy_skill_path" ]; then
+        printf '%s\n' 'Error: refusing to archive an incompatible or symbolic link legacy skill path.' >&2
+        return 1
+    fi
+
+    archive_root=$target_dir/.agents/migration-backups
+    if { [ -e "$archive_root" ] || [ -L "$archive_root" ]; } && { [ -L "$archive_root" ] || [ ! -d "$archive_root" ]; }; then
+        printf '%s\n' 'Error: migration backup path must be a regular directory.' >&2
+        return 1
+    fi
+    archive_name=astra-orchestrator
+    archive_candidate=$archive_root/$archive_name
+    archive_suffix=1
+    while [ -e "$archive_candidate" ] || [ -L "$archive_candidate" ]; do
+        archive_candidate=$archive_root/$archive_name.$archive_suffix
+        archive_suffix=$((archive_suffix + 1))
+    done
+    legacy_archive_path=${archive_candidate#"$target_dir/"}
+}
+
+archive_legacy_skill() {
+    [ -n "$legacy_archive_path" ] || return 0
+    legacy_skill_path=$target_dir/.agents/skills/astra-orchestrator
+    archive_destination=$target_dir/$legacy_archive_path
+    mkdir -p "$(dirname "$archive_destination")" || return 1
+    if [ -e "$archive_destination" ] || [ -L "$archive_destination" ]; then
+        printf 'Error: migration archive destination appeared during setup: %s\n' "$legacy_archive_path" >&2
+        return 1
+    fi
+    if ! mv "$legacy_skill_path" "$archive_destination"; then
+        printf 'Error: could not archive legacy skill to %s.\n' "$legacy_archive_path" >&2
+        return 1
+    fi
+    legacy_skill_archived=yes
+    printf 'Archived legacy skill: .agents/skills/astra-orchestrator -> %s\n' "$legacy_archive_path"
+}
+
 replace_managed_block() {
     normalized_path=$1
     destination_path=$2
     replacement_path=$3
     replacement_output=$transaction_root/agents-updated
 
-    if ! awk -v begin="$managed_begin" -v end="$managed_end" -v replacement="$replacement_path" '
+    if ! awk -v begin="$replace_begin_marker" -v end="$replace_end_marker" -v replacement="$replacement_path" '
         BEGIN { replaced = 0; inside = 0 }
         $0 == begin {
             while ((getline line < replacement) > 0) print line
@@ -334,6 +409,14 @@ replace_managed_block() {
         printf 'Error: could not write the managed block to %s.\n' "$destination_path" >&2
         return 1
     fi
+    if [ "${preserve_crlf:-no}" = yes ]; then
+        crlf_output=$transaction_root/agents-updated-crlf
+        if ! awk '{ printf "%s\r\n", $0 }' "$replacement_output" > "$crlf_output" || \
+            ! cp "$crlf_output" "$destination_path"; then
+            printf 'Error: could not preserve CRLF line endings in %s.\n' "$destination_path" >&2
+            return 1
+        fi
+    fi
 }
 
 install_managed_agents() {
@@ -345,16 +428,21 @@ install_managed_agents() {
         printf 'Error: could not read existing AGENTS.md.\n' >&2
         return 1
     fi
+    crlf_count=$(LC_ALL=C tr -cd '\r' < "$destination_path" | wc -c | tr -d ' ')
+    preserve_crlf=no
+    if [ "$crlf_count" -gt 0 ]; then
+        preserve_crlf=yes
+    fi
 
-    if awk -v begin="$managed_begin" -v end="$managed_end" \
-        '$0 == begin || $0 == end { found = 1 } END { exit !found }' "$normalized_path"; then
-        if ! extract_managed_block "$normalized_path" "$current_block_path"; then
+    if current_namespace=$(classify_managed_block "$normalized_path"); then
+        if ! extract_managed_block "$normalized_path" "$current_block_path" "$current_namespace"; then
             printf '%s\n' 'Error: existing AGENTS.md has a malformed managed block.' >&2
             return 1
         fi
         if cmp -s "$current_block_path" "$managed_block_path"; then
             printf '%s\n' 'Skipped AGENTS.md: managed instructions are already up to date.'
             component_satisfied=yes
+            agents_instructions_canonical=yes
             return 0
         fi
 
@@ -366,13 +454,27 @@ install_managed_agents() {
         if ! backup_component AGENTS.md; then
             return 1
         fi
+        if [ "$current_namespace" = legacy ]; then
+            replace_begin_marker=$legacy_managed_begin
+            replace_end_marker=$legacy_managed_end
+        else
+            replace_begin_marker=$managed_begin
+            replace_end_marker=$managed_end
+        fi
         if ! replace_managed_block "$normalized_path" "$destination_path" "$managed_block_path"; then
             return 1
         fi
         printf '%s\n' 'Updated the managed instructions in AGENTS.md.'
         component_installed=yes
         component_satisfied=yes
+        agents_instructions_canonical=yes
         return 0
+    else
+        classify_status=$?
+        if [ "$classify_status" -ne 2 ]; then
+            printf '%s\n' 'Error: existing AGENTS.md has malformed, mixed, duplicate, or reversed managed markers.' >&2
+            return 1
+        fi
     fi
 
     printf '%s\n' 'WARNING: existing AGENTS.md has no managed instruction block; setup will append one.'
@@ -393,6 +495,7 @@ install_managed_agents() {
     printf '%s\n' 'Appended managed instructions to AGENTS.md. Existing contents preserved.'
     component_installed=yes
     component_satisfied=yes
+    agents_instructions_canonical=yes
 }
 
 copy_component() {
@@ -442,6 +545,14 @@ copy_component() {
         fi
 
         print_overwrites "$source_path" "$destination_path"
+        if [ "$name" = .agents ]; then
+            if ! prepare_legacy_skill_archive; then
+                return 1
+            fi
+            if [ -n "$legacy_archive_path" ]; then
+                printf 'This update will archive .agents/skills/astra-orchestrator to %s.\n' "$legacy_archive_path"
+            fi
+        fi
         if ! confirm "Update $name? New files will be added; only paths listed above will be replaced." no; then
             printf 'Skipped %s (existing target left unchanged).\n' "$name"
             return 0
@@ -451,6 +562,9 @@ copy_component() {
             return 1
         fi
         if [ -d "$source_path" ] && [ -d "$destination_path" ]; then
+            if [ "$name" = .agents ] && ! archive_legacy_skill; then
+                return 1
+            fi
             if ! cp -R "$source_path"/. "$destination_path"/; then
                 printf 'Error: could not update %s.\n' "$name" >&2
                 return 1
@@ -505,6 +619,9 @@ for component in .codex .agents AGENTS.md; do
                 exit 1
             fi
         fi
+        if [ "$component" = AGENTS.md ] && [ "$component_satisfied" = yes ]; then
+            agents_instructions_canonical=yes
+        fi
         if [ "$component_installed" = yes ]; then
             installed=$((installed + 1))
         fi
@@ -517,6 +634,12 @@ for component in .codex .agents AGENTS.md; do
 done
 
 transaction_committed=yes
+if [ "$legacy_skill_archived" = yes ] && [ "$agents_instructions_canonical" != yes ]; then
+    printf '%s\n' 'WARNING: the legacy skill was archived, but AGENTS.md may still reference astra-orchestrator. Approve the AGENTS.md update or edit those references, then rerun setup.' >&2
+fi
+if [ "$agents_instructions_canonical" = yes ] && [ ! -f "$target_dir/.agents/skills/codex-orchestrator/SKILL.md" ]; then
+    printf '%s\n' 'WARNING: AGENTS.md now invokes codex-orchestrator, but the canonical skill is missing because .agents was skipped or declined. Approve the .agents update, then rerun setup.' >&2
+fi
 if [ "$satisfied" -lt 3 ]; then
     printf 'WARNING: partial installation completed (%s of 3 components satisfied).\n' "$satisfied" >&2
 fi

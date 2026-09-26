@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 — 2026-09-26
+
+- Rename the project and repository to Codex Orchestrator at
+  `snaplyze/codex-orchestrator`.
+- Rename the skill to `codex-orchestrator` across all four profiles, installation
+  paths, agent instructions, and usage examples.
+- Migrate legacy managed instructions in place and archive the previous skill
+  outside `skills`, preserving custom files and existing backups.
+- Reject malformed or duplicate instruction blocks and restore component changes
+  if installation fails.
+- Retire the previous GitHub releases and tags. Preserve the project history and
+  the existing model routing, permissions, and concurrency limits.
+
+### Upgrade
+
+Update your clone's `origin` to
+`https://github.com/snaplyze/codex-orchestrator.git`, pull the release, and rerun
+setup. Approve `.codex`, `.agents`, and managed `AGENTS.md` updates together before
+starting a new Codex session. Replace custom `$astra-orchestrator` references with
+`$codex-orchestrator`. Old references can refer to the retired skill.
+
+For global installations, move the old skill outside discovered skill directories
+and copy its renamed replacement. Update scripts pinned to `v0.1.0` or `v0.2.0`
+to use `v0.3.0`. See the [migration guide](https://github.com/snaplyze/codex-orchestrator/blob/v0.3.0/guides/migration.md) for exact paths,
+backup behavior, and partial-update recovery.
+
 ## 0.2.0 — 2026-09-22
 
 - Migrate Plus roots and Luna subagents to GPT-6 Luna; use `high` for Luna

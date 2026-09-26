@@ -55,9 +55,11 @@ and permissions; mentioning Sol in a brief does not configure a model.
 
 ## Upgrade an existing project
 
+For the repository and skill rename, first follow the [migration guide](migration.md).
+
 1. Pull this release and rerun `setup.sh` or `setup.ps1` for the target project.
 2. Select the same profile or intentionally choose a different one.
-3. Review and approve updates to both `.codex` and `.agents`. Updating only the
+3. Review and approve updates to `.codex`, `.agents`, and managed `AGENTS.md` instructions. Updating only the
    root config leaves named role pins and old skill instructions behind.
 4. Start a new Codex session in the trusted target project. Check `/model`
    and the loaded roles before relying on the new topology.

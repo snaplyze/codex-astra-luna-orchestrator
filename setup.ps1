@@ -6,24 +6,22 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $PSCommandPath
-$managedBegin = '<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
-$managedEnd = '<!-- END codex-astra-luna-orchestrator:managed -->'
+$managedBegin = '<!-- BEGIN codex-orchestrator:managed -->'
+$managedEnd = '<!-- END codex-orchestrator:managed -->'
+$legacyManagedBegin = '<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
+$legacyManagedEnd = '<!-- END codex-astra-luna-orchestrator:managed -->'
 $transactionRoot = $null
 $transactionChanges = @()
 $transactionCommitted = $false
 $transactionPreserved = $false
 $managedBlockLines = @()
 $componentSatisfied = $false
+$legacySkillArchived = $false
+$agentsInstructionsCanonical = $false
 $banner = @'
 +---------------------------------------+
-|    _    ____ _____ ____      _        |
-|   / \  / ___|_   _|  _ \    / \       |
-|  / _ \ \___ \ | | | |_) |  / _ \      |
-| / ___ \ ___) || | |  _ <  / ___ \     |
-|/_/   \_\____/ |_| |_| \_\/_/   \_\    |
-|                                       |
-|       O R C H E S T R A T O R         |
-|   GPT-6 Astra/Luna/Sol profiles       |
+|          CODEX ORCHESTRATOR            |
+|       GPT-6 Astra/Sol/Luna profiles    |
 |      with role-specific routing       |
 +---------------------------------------+
 '@
@@ -179,10 +177,10 @@ function Get-ManagedBlockInfo {
     $beginIndexes = @()
     $endIndexes = @()
     for ($index = 0; $index -lt $Lines.Count; $index++) {
-        if ($Lines[$index] -ceq $managedBegin) {
+        if (($Lines[$index] -ceq $managedBegin) -or ($Lines[$index] -ceq $legacyManagedBegin)) {
             $beginIndexes += $index
         }
-        if ($Lines[$index] -ceq $managedEnd) {
+        if (($Lines[$index] -ceq $managedEnd) -or ($Lines[$index] -ceq $legacyManagedEnd)) {
             $endIndexes += $index
         }
     }
@@ -203,10 +201,23 @@ function Get-ManagedBlockInfo {
         }
     }
 
+    $isCanonical = $Lines[$beginIndexes[0]] -ceq $managedBegin
+    $expectedEnd = if ($isCanonical) { $managedEnd } else { $legacyManagedEnd }
+    if ($Lines[$endIndexes[0]] -cne $expectedEnd) {
+        return [pscustomobject]@{
+            HasBlock    = $false
+            IsMalformed = $true
+            Block       = @()
+        }
+    }
+
     return [pscustomobject]@{
         HasBlock    = $true
         IsMalformed = $false
         Block       = [string[]]$Lines[$beginIndexes[0]..$endIndexes[0]]
+        IsCanonical = $isCanonical
+        BeginIndex  = $beginIndexes[0]
+        EndIndex    = $endIndexes[0]
     }
 }
 
@@ -223,7 +234,7 @@ function Test-Profile {
         'codex/agents/reviewer.toml',
         'codex/agents/tester.toml',
         'codex/agents/worker.toml',
-        'agents/skills/astra-orchestrator/SKILL.md'
+        'agents/skills/codex-orchestrator/SKILL.md'
     )
 
     foreach ($relativePath in $requiredPaths) {
@@ -249,7 +260,7 @@ function Start-InstallTransaction {
     $sourceAgentsPath = Join-Path $scriptDir 'AGENTS.md'
     $sourceLines = @([IO.File]::ReadAllLines($sourceAgentsPath))
     $sourceInfo = Get-ManagedBlockInfo -Lines $sourceLines
-    if ($sourceInfo.IsMalformed -or (-not $sourceInfo.HasBlock)) {
+    if ($sourceInfo.IsMalformed -or (-not $sourceInfo.HasBlock) -or (-not $sourceInfo.IsCanonical)) {
         throw 'Setup source AGENTS.md has an invalid managed instruction block.'
     }
 
@@ -350,10 +361,13 @@ function Write-TextLines {
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
         [AllowEmptyString()]
-        [string[]]$Lines
+        [string[]]$Lines,
+
+        [string]$NewLine = [Environment]::NewLine
     )
 
-    [IO.File]::WriteAllLines($Path, $Lines, [Text.UTF8Encoding]::new($false))
+    $text = [string]::Join($NewLine, $Lines) + $NewLine
+    [IO.File]::WriteAllText($Path, $text, [Text.UTF8Encoding]::new($false))
 }
 
 function Update-ManagedAgents {
@@ -389,22 +403,17 @@ function Update-ManagedAgents {
         Backup-InstallComponent -Name 'AGENTS.md' -TargetDirectory $TargetDirectory
         $updatedLines = New-Object 'System.Collections.Generic.List[string]'
         for ($index = 0; $index -lt $currentLines.Count; $index++) {
-            if ($currentLines[$index] -ceq $managedBegin) {
+            if ($index -eq $currentInfo.BeginIndex) {
                 foreach ($line in @($script:managedBlockLines)) {
                     $updatedLines.Add($line)
                 }
-                while (($index + 1) -lt $currentLines.Count -and $currentLines[$index + 1] -cne $managedEnd) {
-                    $index++
-                }
-                if (($index + 1) -ge $currentLines.Count) {
-                    throw 'Could not locate the end of the managed instruction block.'
-                }
-                $index++
+                $index = $currentInfo.EndIndex
                 continue
             }
             $updatedLines.Add($currentLines[$index])
         }
-        Write-TextLines -Path $DestinationPath -Lines $updatedLines.ToArray()
+        $newLine = if ([IO.File]::ReadAllText($DestinationPath).Contains("`r`n")) { "`r`n" } else { "`n" }
+        Write-TextLines -Path $DestinationPath -Lines $updatedLines.ToArray() -NewLine $newLine
         [Console]::WriteLine('Updated the managed instructions in AGENTS.md.')
         $script:componentSatisfied = $true
         return $true
@@ -486,6 +495,36 @@ function Show-OverwriteWarning {
     }
 }
 
+function Get-LegacySkillArchivePath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AgentsDirectory
+    )
+
+    $legacyPath = Join-Path $AgentsDirectory 'skills/astra-orchestrator'
+    $legacyItem = Get-Item -LiteralPath $legacyPath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $legacyItem) {
+        return $null
+    }
+    if (-not $legacyItem.PSIsContainer) {
+        throw "Legacy skill path must be a directory: $legacyPath"
+    }
+
+    $backupDirectory = Join-Path $AgentsDirectory 'migration-backups'
+    $backupItem = Get-Item -LiteralPath $backupDirectory -Force -ErrorAction SilentlyContinue
+    if (($null -ne $backupItem) -and (-not $backupItem.PSIsContainer)) {
+        throw "Legacy skill backup path must be a directory: $backupDirectory"
+    }
+    $basePath = Join-Path $backupDirectory 'astra-orchestrator'
+    $archivePath = $basePath
+    $suffix = 0
+    while ($null -ne (Get-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue)) {
+        $suffix++
+        $archivePath = "$basePath.$suffix"
+    }
+    return $archivePath
+}
+
 function Install-Component {
     param(
         [Parameter(Mandatory)]
@@ -544,12 +583,33 @@ function Install-Component {
 
         Show-OverwriteWarning -Source $sourceItem -Destination $destinationPath -Name $Name
 
-        if (-not (Read-Confirmation -Prompt "Update ${Name}? New files will be added; only paths listed above will be replaced." -DefaultYes $false)) {
+        $archivePath = $null
+        if ($Name -eq '.agents') {
+            $archivePath = Get-LegacySkillArchivePath -AgentsDirectory $destinationPath
+            if ($null -ne $archivePath) {
+                [Console]::WriteLine("Legacy skill will be moved from $(Join-Path $destinationPath 'skills/astra-orchestrator') to $archivePath.")
+            }
+        }
+
+        $updatePrompt = "Update ${Name}? New files will be added; only paths listed above will be replaced."
+        if ($null -ne $archivePath) {
+            $updatePrompt += ' The legacy skill will be archived at the path listed above.'
+        }
+        if (-not (Read-Confirmation -Prompt $updatePrompt -DefaultYes $false)) {
             [Console]::WriteLine("Skipped $Name (existing target left unchanged).")
             return $false
         }
 
         Backup-InstallComponent -Name $Name -TargetDirectory $TargetDirectory
+        if ($null -ne $archivePath) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $archivePath) -Force | Out-Null
+            if ($null -ne (Get-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue)) {
+                throw "Migration archive destination appeared during setup: $archivePath"
+            }
+            Move-Item -LiteralPath (Join-Path $destinationPath 'skills/astra-orchestrator') -Destination $archivePath | Out-Null
+            $script:legacySkillArchived = $true
+            [Console]::WriteLine("Archived legacy skill to $archivePath.")
+        }
         if ($sourceItem.PSIsContainer -and $destinationItem.PSIsContainer) {
             Copy-DirectoryContents -Source $sourcePath -Destination $destinationPath
         }
@@ -617,6 +677,9 @@ try {
             }
             if ($script:componentSatisfied) {
                 $satisfied++
+                if ($component -eq 'AGENTS.md') {
+                    $agentsInstructionsCanonical = $true
+                }
             }
         }
         else {
@@ -625,6 +688,12 @@ try {
     }
 
     $script:transactionCommitted = $true
+    if ($script:legacySkillArchived -and (-not $agentsInstructionsCanonical)) {
+        [Console]::Error.WriteLine('WARNING: the legacy skill was archived, but AGENTS.md may still reference astra-orchestrator. Approve the AGENTS.md update or edit those references, then rerun setup.')
+    }
+    if ($agentsInstructionsCanonical -and (-not (Test-Path -LiteralPath (Join-Path $targetDirectory '.agents/skills/codex-orchestrator/SKILL.md') -PathType Leaf))) {
+        [Console]::Error.WriteLine('WARNING: AGENTS.md now invokes codex-orchestrator, but the canonical skill is missing because .agents was skipped or declined. Approve the .agents update, then rerun setup.')
+    }
     if ($satisfied -lt 3) {
         [Console]::Error.WriteLine("WARNING: partial installation completed ($satisfied of 3 components satisfied).")
     }

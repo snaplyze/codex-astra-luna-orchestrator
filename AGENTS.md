@@ -1,9 +1,9 @@
-# Codex project instructions
+# Codex Orchestrator project instructions
 
 <!-- Modified for this distribution: adaptive delegation routing guidance. -->
 
-<!-- BEGIN codex-astra-luna-orchestrator:managed -->
-For complex coding tasks, use the `astra-orchestrator` skill when its trigger conditions match.
+<!-- BEGIN codex-orchestrator:managed -->
+For complex coding tasks, use the `codex-orchestrator` skill when its trigger conditions match.
 
 The root agent owns architecture, scope decisions, delegation, integration, and final verification.
 Prefer specialized subagents for bounded exploration, implementation, testing, review, and technical research.
@@ -24,4 +24,4 @@ Schedule independent work within the configured child-thread cap; queue excess w
 Model and reasoning assignments live in `.codex/config.toml` and `.codex/agents/*.toml`; this file defines behavior and boundaries rather than duplicating configuration.
 Use the active runtime role definitions when a session predates a configuration update. Report unavailable models and explicit fallbacks rather than silently substituting them.
 User instructions always take precedence over this orchestration policy.
-<!-- END codex-astra-luna-orchestrator:managed -->
+<!-- END codex-orchestrator:managed -->
