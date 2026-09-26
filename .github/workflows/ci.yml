@@ -9,36 +9,65 @@ permissions:
 
 jobs:
   tests:
-    name: Tests (${{ matrix.os }})
+    name: Tests (${{ matrix.os }}, ${{ matrix.engine }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
+        include:
+          - os: ubuntu-latest
+            engine: sh
+          - os: macos-latest
+            engine: sh
+          - os: windows-latest
+            engine: pwsh
+          - os: windows-latest
+            engine: powershell
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0, Node 24
         with:
           python-version: '3.12'
 
       - name: Run tests
         env:
           PYTHONDONTWRITEBYTECODE: '1'
+          CODEX_INSTALLER_TEST_ENGINE: ${{ matrix.engine }}
         run: python -m unittest discover -v
 
       - name: Check shell installer syntax
         if: runner.os != 'Windows'
         run: sh -n setup.sh
 
-      - name: Check PowerShell installer syntax
-        if: runner.os == 'Windows'
+      - name: Lint shell installer
+        if: runner.os == 'Linux'
+        run: shellcheck setup.sh
+
+      - name: Check PowerShell 7 installer syntax
+        if: matrix.engine == 'pwsh'
         shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'setup.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Check Windows PowerShell installer syntax
+        if: matrix.engine == 'powershell'
+        shell: powershell
         run: |
           $tokens = $null
           $errors = $null

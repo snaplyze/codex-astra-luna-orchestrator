@@ -78,10 +78,17 @@ instructions and the same permission boundaries. Otherwise report the limitation
 Every brief contains:
 
 1. Objective and repository path.
-2. Relevant files, evidence, and necessary context.
-3. Ownership: writable files or an explicit read-only assignment.
-4. Constraints, including what would require a parent decision.
-5. Deliverable and acceptance criteria, including focused verification.
+2. Mode: audit/research/review or implementation, with the user's current limits.
+3. Relevant files, evidence, and necessary context.
+4. Ownership: writable files or an explicit read-only assignment.
+5. Authority: permitted Git and external actions, including any authorization
+   already given. Delegation does not grant additional authority; carry these
+   limits even with no inherited conversation.
+6. Constraints, including what would require a parent decision.
+7. Deliverable and acceptance criteria, including focused verification.
+
+Read-only work includes avoiding writes through external tools, not just files.
+Do not repeat approval requests for actions already authorized within this scope.
 
 Example, only when these fields are supported by the active tool:
 

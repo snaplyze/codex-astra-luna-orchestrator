@@ -32,6 +32,16 @@ EXPECTED = {
 
 
 class ProfileTopologyTests(unittest.TestCase):
+    def test_profiles_share_the_same_orchestration_policy(self) -> None:
+        reference = (ROOT / "profiles/pro/agents/skills/codex-orchestrator/SKILL.md").read_bytes()
+        for profile in (ROOT / "profiles").iterdir():
+            with self.subTest(profile=profile.name):
+                self.assertEqual(
+                    (profile / "agents/skills/codex-orchestrator/SKILL.md").read_bytes(),
+                    reference,
+                    "Shared routing policy must stay consistent across profiles",
+                )
+
     def test_profiles_ship_one_skill_with_matching_identity(self) -> None:
         for profile in (ROOT / "profiles").iterdir():
             with self.subTest(profile=profile.name):
