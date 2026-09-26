@@ -16,25 +16,34 @@ confirming that your Codex version and plan support a higher concurrency cap.
 
 ## What Codex records
 
-Codex writes one rollout file per thread under
-`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Root and subagent threads
-each get their own file. The relevant fields are:
+Codex stores rollout JSONL under
+`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Root and subagent threads have
+separate histories. A revert can create another rollout segment with the same
+stable thread ID, so file counts are not thread counts. The relevant fields are:
 
 - `session_meta` (line 1): `id`, `session_id` (the root thread id, shared by
   every subagent), `parent_thread_id`, `cwd`, `cli_version`, and
   `source.subagent.thread_spawn.agent_role` for spawned agents.
-- `turn_context`: the `model` and `effort` in force for the turn. Subagent
-  threads start with the parent's settings, so the last `turn_context` is the
-  authoritative one.
+- `turn_context`: the `model` and `effort` in force for the turn. Response usage
+  is attributed to the model from the preceding context, not one model guessed
+  for the entire history. The displayed effort is the final known effort for
+  that segment's last model; historical effort changes are not aggregated.
 - `token_usage_record`: one per model response, with per-response
   `input_tokens`, `cached_input_tokens`, `output_tokens`,
   `reasoning_output_tokens`, and `total_tokens`.
-- `token_count` (inside `event_msg`): cumulative totals for the thread plus
-  `rate_limits.primary` (5-hour window) and `rate_limits.secondary` (7-day
-  window) as `used_percent`, and `plan_type`.
+- `token_count` (inside `event_msg`): optional cumulative totals and independent
+  `rate_limits` snapshots. Each primary/secondary window can provide
+  `used_percent`, `window_minutes` and `resets_at`; the snapshot can identify
+  its `limit_id` and `plan_type`.
 
-Grouping every rollout by `session_id` therefore gives the full cost of one
-orchestrated task, split by thread, role, and model, with no instrumentation.
+Grouping available rollouts by `session_id` estimates recorded usage for an
+orchestrated session, split by thread, role, and model. This is not a billing
+record. Missing files, legacy formats and partial scans can limit completeness.
+
+Reports distinguish unique threads from rollout segments, describe their scan
+scope and include diagnostics for damaged input or conflicting counters.
+Implementation status and verification evidence for USG-01 through USG-08 are
+tracked in the [remediation plan](../docs/audit-remediation.md).
 
 ## Measuring a run
 
@@ -46,21 +55,57 @@ read-only.
 scripts/token_usage.py --list --date 2026-09-07
 
 # Report on one session (any unique id prefix works)
-scripts/token_usage.py --root 01a079f2 --date 2026-09-07
+scripts/token_usage.py --root 01a079f2
 
 # Report on the most recent session that used subagents
-scripts/token_usage.py --latest --date 2026-09-07
+scripts/token_usage.py --latest
 
 # Machine-readable output
 scripts/token_usage.py --root 01a079f2 --format json
 ```
 
-Omitting `--date` scans the whole sessions directory, which is slower.
+Omitting `--date` scans the whole sessions directory, which is slower. `--date`
+limits files by their directory date, not by the full lifetime of a session.
+A session continued across midnight can have children outside that directory.
+Use it for discovery or deliberately partial reports; omit it for a session-wide
+scan. Date-filtered reports are explicitly marked partial. An unfiltered scan
+still cannot prove that every related rollout exists in the scanned directory.
 Codex auto-review (guardian) threads are listed but excluded from totals by
 default; add `--include-guardian` to count them.
 
 If you have a plain root-only session to compare against, run the same
 command with its id. The script works for sessions with zero subagents.
+
+## Report contract and limitations
+
+Markdown rows identify the thread and rollout segment. Thread counts use stable
+IDs across segments; response records from earlier segments remain counted.
+Quota labels use recorded durations, or `unknown` when unavailable. Resets or
+changed limit identities make the snapshots unsuitable for a simple cost delta.
+
+JSON retains `root` and `threads` and adds:
+
+- `thread_count` and `segment_count`: distinct stable IDs and scanned rollouts.
+- `scope`: canonical `date_filter`, `scan`, `partial`, `coverage_unknown` and
+  explanatory `limitations`. Unknown coverage remains true even without a date.
+- `diagnostics`: input/reconciliation warnings. Treat a partial report as
+  observed usable data, not a complete bill.
+
+Each entry in `threads` represents a segment and includes `stable_thread_id`,
+`segment` and `segment_count`. `cumulative_total` and `cumulative_fields` preserve
+the available cumulative evidence. The Markdown quota line identifies its root
+segment; inspect the per-segment JSON snapshots when a root has several rollouts.
+It does not merge snapshots with uncertain chronology. If per-response usage is
+present, the displayed totals use those records. A mismatch with cumulative evidence produces a diagnostic; the
+two values are not added together and an unexplained remainder is not assigned
+to a model. Legacy histories without response records use the cumulative fallback.
+
+Exit status is 0 for a rendered report, including a diagnosed partial report;
+1 when the scan finds no usable sessions or `--latest` has no eligible session;
+2 for invalid arguments, zero or multiple `--root` matches, or a missing sessions
+directory. Automated consumers
+must inspect diagnostics/scope, not only the exit status. Invalid input is skipped
+or rejected with a diagnostic rather than treated as trustworthy zero usage.
 
 ## Benchmark protocol
 
@@ -68,14 +113,21 @@ If you want numbers that are comparable across configurations:
 
 1. Pick three or four representative tasks in one repository: a single-file
    fix, a multi-file feature, a cross-component bug, and a research-heavy
-   change. Write the prompts down and reuse them verbatim.
+   change. Write the prompts down and reuse them verbatim. Define acceptance
+   checks before running: tests, required behavior and review criteria. Record
+   the exact source commit and prepare a separate disposable checkout of that
+   same state for each trial. Do not reuse a previous trial's code changes.
 2. Run each task in at least two configurations:
    - Baseline: Astra root only, `[agents] enabled = false`, no skill.
    - Orchestrated: the selected Pro, Pro max-2, Plus, or Plus max-2 profile as installed.
    - Optional floor: Luna root only, to see the cheapest possible run.
-3. Record for every run: per-model uncached input, cached input, output and
+3. Use a fresh session for each trial and state the cache conditions you can
+   control. Do not claim cold caches if the provider cache cannot be reset.
+   Record for every run: acceptance checks and success/partial/fail outcome;
+   per-model uncached input, cached input, output and
    reasoning tokens; number of subagents spawned; wall time; and the change
-   in 5-hour and 7-day `used_percent`.
+   in comparable `used_percent` snapshots. Record other account activity and
+   reset boundaries; omit quota deltas when those conditions are unknown.
 4. Repeat each cell two or three times. Variance between runs of the same
    prompt is large enough that a single sample misleads.
 5. Record the profile and any overrides: Pro and Pro max-2 use Astra `medium`,
@@ -84,25 +136,29 @@ If you want numbers that are comparable across configurations:
    All profiles use an Astra `low` reviewer. Note whether the concurrency
    limit is 4 or 2, plus the Codex version. Caching behaviour and subagent context handling
    change between releases.
+6. Compare cost and latency among successful trials, and separately report the
+   success fraction and spread. A short incomplete answer is not an economical
+   success. Save redacted commands/results sufficient to repeat one trial.
 
 Suggested results table:
 
-| Task | Config | Astra uncached / cached / out | Sol uncached / cached / out | Luna uncached / cached / out | Subagents | Wall | 5h delta | 7d delta |
-|---|---|---|---|---|---:|---:|---:|---:|
+| Task / source commit | Config / client | Acceptance result | Astra uncached / cached / out | Sol uncached / cached / out | Luna uncached / cached / out | Subagents | Wall | Comparable quota delta |
+|---|---|---|---|---|---|---:|---:|---|
 
 ## Reading the numbers
 
-Cached input dominates. In the sample below 96% of input tokens were cache
-hits. A raw `total_tokens` figure therefore overstates cost by more than an
-order of magnitude. Always look at uncached input and output separately.
+In the historical sample below, 96.3% of input tokens were cache hits.
+`total_tokens` is not monetary cost. Read cached input, uncached input and output
+separately. A monetary estimate requires model-specific prices, processing tier,
+date and an explicit formula; a cache fraction alone does not establish a savings
+multiplier. API prices do not establish Plus/Pro allowance consumption.
 
-Rate-limit percentages are what Plus and Pro users actually pay with. The
-plan is metered on the 5-hour and 7-day windows, not on raw tokens, and the
-mapping from tokens to window usage is not published and may differ by
-model. The `used_percent` delta is the
-most honest single number for "how much of my plan did this task cost". Note
-that the window is account-wide, so other Codex sessions running at the same
-time inflate the delta.
+Rate-limit percentages describe account quota snapshots. The mapping from tokens
+to quota consumption is not published and may differ by model. A difference is
+only interpretable when both snapshots refer to the same limit and reset period.
+Other account activity, resets and missing snapshots prevent attribution to one
+task. Read actual window durations when available instead of assuming every
+primary/secondary pair is five hours/seven days.
 
 The root thread was the largest line item in the historical sample below. It stays
 alive for the whole task, polls subagents, and re-reads its context on every
