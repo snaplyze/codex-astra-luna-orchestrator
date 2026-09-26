@@ -100,12 +100,12 @@ leaves the old skill discoverable, so retire the previous directory too.
 GitHub releases and tags, `v0.1.0` and `v0.2.0`, are retired. Their changes remain
 in Git history and the [changelog](../CHANGELOG.md).
 
-Update scripts pinned to those tags to use `v0.3.0` and the new repository URL.
+Update scripts pinned to those tags to use `v0.3.1` and the new repository URL.
 Remove obsolete tags from an existing local clone if they are no longer needed:
 
 ```bash
 git tag -d v0.1.0 v0.2.0
-git fetch origin tag v0.3.0
+git fetch origin tag v0.3.1
 ```
 
 Ordinary fetch/prune operations do not remove those local tags automatically.

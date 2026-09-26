@@ -1,17 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-09-26
 
-- Replace managed files through staging and journal rollback per path; preserve
-  hardlinked external files and concurrent user work, with conflict recovery copies.
+- Stage managed-file replacements and roll back only installer-owned changes.
+  Preserve external hardlinks and concurrent edits, with recovery copies for conflicts.
 - Keep maintainer instructions out of fresh project installations and carry task
   authority explicitly through delegation briefs and role instructions.
-- Report usage scan scope, malformed-input diagnostics, quota windows and rollout
-  segments without treating observed tokens as a complete bill.
-- Verify Linux, macOS, PowerShell 7 and Windows PowerShell 5.1 with explicit test
-  engines; enforce identical shared skill policy across profiles.
-- Add the audit execution record and development guide; clarify benchmark quality,
-  source-state and cache controls. Model routing and permissions are unchanged.
+- Show usage scan scope, malformed-input diagnostics, quota windows and distinct
+  threads/rollout segments.
+- Test Linux, macOS, PowerShell 7 and Windows PowerShell 5.1; enforce identical
+  shared skill policy across profiles.
+- Add audit/development documentation and clarify benchmark controls.
+  Model routing and permission defaults remain unchanged.
+
+### Upgrade
+
+Update your checkout, rerun setup for project installations and approve the
+configuration, skill and instruction updates, then restart Codex. For global
+installations, follow the [migration guide](https://github.com/snaplyze/codex-orchestrator/blob/v0.3.1/guides/migration.md#manual-or-global-installations).
+JSON consumers should use `thread_count` and `segment_count` and inspect
+`scope` and `diagnostics`.
+
+Validation: 56 tests pass in each of four native CI jobs.
 
 ## 0.3.0 — 2026-09-26
 

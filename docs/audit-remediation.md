@@ -305,8 +305,9 @@ unsupported assumptions about live model access and native platform success.
 
 All **17 findings are implemented and verified**. No numbered finding is deferred,
 blocked or closed merely by documentation. The native goal was activated after
-the documentation gate; its lifecycle remains active at this saved checkpoint
-until the final branch/clean-tree check and native completion call.
+the documentation gate and completed after final branch/clean-tree verification
+at `2415e848838147a4819532fdbcf7d42e448e941e` and successful
+[CI run 36238626888](https://github.com/snaplyze/codex-orchestrator/actions/runs/36238626888).
 
 Implementation branch: `fix/audit-remediation`, based on clean `main` at
 `2eb8173211a90eb45335617839f9d5a5b5e9497d`. There were no pre-existing user
@@ -433,8 +434,8 @@ race. Account model access, fresh live Codex role/skill discovery and paid
 quality benchmarks were not run; the documented smoke procedure and benchmark
 protocol keep those separate from static/native installer checks.
 
-Finalization/resume rule: publish this documentation record if it is still local,
-check the final branch/CI state, and close the existing native goal if it remains
-active. If those steps have already completed, there is no remaining audit work.
-Use current Git and native goal state to distinguish them; do not start a new
-audit or goal.
+The audit goal is complete. Subsequent user instructions authorize a v0.3.1
+release from main and deletion of merged working branches. The release uses the
+versioned CHANGELOG.md section as its notes source; this follow-up does not reopen
+the audit or add implementation scope. Use current Git, release and native goal
+state when resuming; do not create a duplicate audit goal.
