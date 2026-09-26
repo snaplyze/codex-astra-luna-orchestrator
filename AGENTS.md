@@ -2,6 +2,25 @@
 
 <!-- Modified for this distribution: adaptive delegation routing guidance. -->
 
+## Maintaining this source repository
+
+Read `docs/audit-remediation.md` and its latest execution checkpoint before
+continuing audit remediation, including after context compaction. Use its finding
+IDs and acceptance criteria; keep status and verification evidence current.
+For development commands and validation boundaries, read `guides/development.md`.
+
+The installed paths below describe target projects. In a clean source checkout,
+read `profiles/pro/agents/skills/codex-orchestrator/SKILL.md` directly when the
+skill is not discovered; all bundled profiles share that policy. Model defaults
+come from the selected profile and active runtime, not the example path.
+
+Preserve user changes. Give each delegated task an explicit mode (audit or
+implementation), writable scope and authorized external actions. Delegation does
+not expand permissions or require repeating approvals already given. Run focused
+regressions and applicable full checks; distinguish unavailable checks from passes.
+Do not install this distribution into its own checkout or edit global settings
+to satisfy a test. Keep these maintainer rules outside the distributed block.
+
 <!-- BEGIN codex-orchestrator:managed -->
 For complex coding tasks, use the `codex-orchestrator` skill when its trigger conditions match.
 
@@ -15,6 +34,7 @@ Treat orchestration as adaptive routing, not a fixed pipeline:
 - For risky or cross-cutting work: expand into investigation, implementation, verification, and independent review.
 
 Workers get bounded ownership and should finish their assignment rather than repeatedly handing it back.
+Every delegation carries the user's task mode, permitted file changes and authorized Git/external actions. Delegation does not expand authority; preserve approvals already given within scope.
 Specialists (tester, reviewer, researcher) are conditional, not mandatory pipeline stages.
 Review should be proportional to risk rather than automatically invoking the full topology.
 

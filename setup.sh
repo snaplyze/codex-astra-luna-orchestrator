@@ -10,7 +10,7 @@ legacy_managed_begin='<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
 legacy_managed_end='<!-- END codex-astra-luna-orchestrator:managed -->'
 transaction_root=
 managed_block_path=
-changed_components=
+transaction_entry_count=0
 transaction_committed=no
 transaction_preserved=no
 legacy_skill_archived=no
@@ -43,38 +43,103 @@ rollback() {
         return 0
     fi
 
-    if [ -z "${changed_components:-}" ]; then
+    if [ "${transaction_entry_count:-0}" -eq 0 ] && [ -z "${legacy_archive_path:-}" ]; then
         return 0
     fi
 
-    printf '%s\n' 'Setup failed; restoring the target to its previous state.' >&2
+    printf '%s\n' 'Setup failed; reverting installer changes and preserving concurrent edits.' >&2
     rollback_failed=no
-    while IFS='|' read -r component state; do
-        [ -n "$component" ] || continue
-        destination_path=$target_dir/$component
-        if [ "$state" = existing ]; then
-            if ! rm -rf "$destination_path"; then
-                printf 'Warning: could not remove the failed component before restoring %s.\n' "$component" >&2
+    entry=$transaction_entry_count
+    while [ "$entry" -gt 0 ]; do
+        entry_path=$transaction_root/entry-$entry
+        IFS= read -r relative_path < "$entry_path/manifest.txt"
+        entry_state=$(sed -n '2p' "$entry_path/manifest.txt")
+        destination_path=$target_dir/$relative_path
+        before_path=$entry_path/before
+        after_path=$entry_path/after
+        if ! safe_target_entry "$relative_path"; then
+            printf 'WARNING: managed path %s became a symbolic link or passed through one; it was preserved with recovery copies in %s.\n' "$relative_path" "$entry_path" >&2
+            rollback_failed=yes
+            entry=$((entry - 1))
+            continue
+        fi
+        if [ "$entry_state" = existing ] && [ -f "$destination_path" ] && files_match "$destination_path" "$before_path"; then
+            entry=$((entry - 1))
+            continue
+        fi
+        if [ "$entry_state" = existing ] && [ -f "$destination_path" ] && files_match "$destination_path" "$after_path"; then
+            replacement=$(mktemp "$(dirname "$destination_path")/.codex-orchestrator-rollback.XXXXXXXX") || replacement=
+            if [ -z "$replacement" ] || ! cp -p "$before_path" "$replacement" || ! mv -f "$replacement" "$destination_path"; then
+                [ -z "$replacement" ] || rm -f "$replacement"
+                printf 'Warning: could not restore %s from retained backup.\n' "$relative_path" >&2
                 rollback_failed=yes
-                continue
             fi
-            if ! cp -R "$transaction_root/backup-$component" "$destination_path"; then
-                printf 'Warning: could not restore %s from backup.\n' "$component" >&2
+        elif [ "$entry_state" = new ] && [ -f "$destination_path" ] && files_match "$destination_path" "$after_path"; then
+            if ! rm -f "$destination_path"; then
+                printf 'Warning: could not remove failed installer output %s.\n' "$relative_path" >&2
                 rollback_failed=yes
             fi
         else
-            if ! rm -rf "$destination_path"; then
-                printf 'Warning: could not remove the failed new component: %s.\n' "$component" >&2
+            printf 'WARNING: concurrent change at %s was preserved; recovery copies are in %s.\n' "$relative_path" "$entry_path" >&2
+            rollback_failed=yes
+        fi
+        entry=$((entry - 1))
+    done
+    if [ -f "$transaction_root/legacy-move" ]; then
+        IFS='|' read -r legacy_original legacy_archive < "$transaction_root/legacy-move"
+        if ! safe_target_entry "$legacy_archive" || ! safe_target_entry "$legacy_original"; then
+            printf 'WARNING: legacy skill rollback path became a symbolic link; archive preserved at %s.\n' "$legacy_archive" >&2
+            rollback_failed=yes
+        elif [ -e "$target_dir/$legacy_archive" ] && [ ! -e "$target_dir/$legacy_original" ]; then
+            if ! mv "$target_dir/$legacy_archive" "$target_dir/$legacy_original"; then
+                printf 'Warning: could not restore archived legacy skill; it remains at %s.\n' "$legacy_archive" >&2
                 rollback_failed=yes
             fi
+        elif [ -e "$target_dir/$legacy_archive" ]; then
+            printf 'WARNING: legacy skill rollback destination %s is occupied; archive retained at %s.\n' "$legacy_original" "$legacy_archive" >&2
+            rollback_failed=yes
         fi
-    done <<EOF_CHANGES
-$changed_components
-EOF_CHANGES
+    fi
+    if [ -f "$transaction_root/created-dirs" ]; then
+        awk '{ paths[NR] = $0 } END { for (i = NR; i > 0; i--) print paths[i] }' "$transaction_root/created-dirs" > "$transaction_root/created-dirs-reverse"
+        while IFS= read -r created_dir; do
+            [ -n "$created_dir" ] || continue
+            if ! safe_target_entry "$created_dir"; then
+                printf 'WARNING: created directory %s now passes through a symbolic link; it was preserved.\n' "$created_dir" >&2
+                rollback_failed=yes
+            elif ! rmdir "$target_dir/$created_dir" 2>/dev/null; then
+                :
+            fi
+        done < "$transaction_root/created-dirs-reverse"
+    fi
     if [ "$rollback_failed" = yes ]; then
         transaction_preserved=yes
         printf 'Warning: rollback was incomplete; transaction backups were retained at %s\n' "$transaction_root" >&2
     fi
+}
+
+file_metadata() {
+    stat -c '%a:%u:%g' "$1" 2>/dev/null || stat -f '%Lp:%u:%g' "$1" 2>/dev/null || printf '%s' unknown
+}
+
+files_match() {
+    [ ! -L "$1" ] && [ -f "$1" ] && cmp -s "$1" "$2" && [ "$(file_metadata "$1")" = "$(file_metadata "$2")" ]
+}
+
+safe_target_entry() {
+    relative_path=$1
+    remainder=$relative_path
+    current_path=$target_dir
+    [ ! -L "$current_path" ] || return 1
+    while :; do
+        case "$remainder" in
+            */*) part=${remainder%%/*}; remainder=${remainder#*/} ;;
+            *) part=$remainder; remainder= ;;
+        esac
+        current_path=$current_path/$part
+        [ ! -L "$current_path" ] || return 1
+        [ -z "$remainder" ] && return 0
+    done
 }
 
 cleanup_transaction() {
@@ -91,7 +156,6 @@ cleanup_transaction() {
     fi
     transaction_root=
     managed_block_path=
-    changed_components=
     transaction_preserved=no
 }
 
@@ -131,25 +195,94 @@ begin_transaction() {
     fi
 }
 
-backup_component() {
-    component=$1
-    destination_path=$target_dir/$component
+ensure_target_directory() {
+    relative_directory=$1
+    current_path=$target_dir
+    remainder=$relative_directory
+    while :; do
+        case "$remainder" in
+            */*) directory_part=${remainder%%/*}; remainder=${remainder#*/} ;;
+            *) directory_part=$remainder; remainder= ;;
+        esac
+        current_path=$current_path/$directory_part
+        if [ -L "$current_path" ]; then
+            printf 'Error: managed path passes through a symbolic link: %s\n' "$current_path" >&2
+            return 1
+        fi
+        if [ ! -d "$current_path" ]; then
+            if [ -e "$current_path" ]; then
+                printf 'Error: managed directory path is incompatible: %s\n' "$current_path" >&2
+                return 1
+            fi
+            mkdir "$current_path" || return 1
+            printf '%s\n' "${current_path#"$target_dir"/}" >> "$transaction_root/created-dirs"
+        fi
+        [ -z "$remainder" ] && break
+    done
+}
 
-    if [ -e "$destination_path" ] || [ -L "$destination_path" ]; then
-        if [ -L "$destination_path" ]; then
-            printf 'Error: refusing to back up symbolic link component: %s\n' "$component" >&2
+install_file() {
+    source_file=$1
+    relative_path=$2
+    destination_file=$target_dir/$relative_path
+    safe_target_entry "$relative_path" || {
+        printf 'Error: refusing to write through a symbolic link: %s\n' "$relative_path" >&2
+        return 1
+    }
+    next_entry=$((transaction_entry_count + 1))
+    entry_path=$transaction_root/entry-$next_entry
+    mkdir "$entry_path"
+    if [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
+        if [ -L "$destination_file" ] || [ ! -f "$destination_file" ]; then
+            printf 'Error: managed file path is incompatible: %s\n' "$relative_path" >&2
+            rm -rf "$entry_path"
             return 1
         fi
-        if ! cp -R "$destination_path" "$transaction_root/backup-$component"; then
-            printf 'Error: could not back up existing component: %s\n' "$component" >&2
-            return 1
-        fi
-        changed_components="$component|existing
-$changed_components"
+        cp -p "$destination_file" "$entry_path/before" || { rm -rf "$entry_path"; return 1; }
+        cp -p "$destination_file" "$entry_path/after" || { rm -rf "$entry_path"; return 1; }
+        cat "$source_file" > "$entry_path/after" || { rm -rf "$entry_path"; return 1; }
+        entry_state=existing
     else
-        changed_components="$component|new
-$changed_components"
+        cp -p "$source_file" "$entry_path/after" || { rm -rf "$entry_path"; return 1; }
+        entry_state=new
     fi
+    printf '%s\n%s\n' "$relative_path" "$entry_state" > "$entry_path/manifest.txt"
+    transaction_entry_count=$next_entry
+    parent_relative=${relative_path%/*}
+    if [ "$parent_relative" != "$relative_path" ]; then
+        ensure_target_directory "$parent_relative" || return 1
+    fi
+    temporary_file=$(mktemp "$(dirname "$destination_file")/.codex-orchestrator-install.XXXXXXXX") || return 1
+    safe_target_entry "$relative_path" || { rm -f "$temporary_file"; return 1; }
+    if [ "$entry_state" = existing ]; then
+        if ! files_match "$destination_file" "$entry_path/before"; then
+            rm -f "$temporary_file"
+            printf 'Error: managed file changed during setup; preserving current contents: %s\n' "$relative_path" >&2
+            return 1
+        fi
+    elif [ -e "$destination_file" ] || [ -L "$destination_file" ]; then
+        rm -f "$temporary_file"
+        printf 'Error: managed path appeared during setup; preserving current contents: %s\n' "$relative_path" >&2
+        return 1
+    fi
+    if ! cp -p "$entry_path/after" "$temporary_file" || ! mv -f "$temporary_file" "$destination_file"; then
+        rm -f "$temporary_file"
+        return 1
+    fi
+}
+
+install_tree() {
+    source_path=$1
+    component=$2
+    if [ ! -d "$target_dir/$component" ]; then
+        mkdir "$target_dir/$component" || return 1
+        printf '%s\n' "$component" >> "$transaction_root/created-dirs"
+    fi
+    find "$source_path" -type f -print > "$transaction_root/source-files"
+    while IFS= read -r source_file; do
+        relative_inside=${source_file#"$source_path"/}
+        install_file "$source_file" "$component/$relative_inside" || exit 1
+    done < "$transaction_root/source-files"
 }
 
 validate_profile() {
@@ -364,12 +497,16 @@ archive_legacy_skill() {
     [ -n "$legacy_archive_path" ] || return 0
     legacy_skill_path=$target_dir/.agents/skills/astra-orchestrator
     archive_destination=$target_dir/$legacy_archive_path
-    mkdir -p "$(dirname "$archive_destination")" || return 1
+    safe_target_entry .agents/skills/astra-orchestrator || return 1
+    safe_target_entry "$legacy_archive_path" || return 1
+    ensure_target_directory .agents/migration-backups || return 1
     if [ -e "$archive_destination" ] || [ -L "$archive_destination" ]; then
         printf 'Error: migration archive destination appeared during setup: %s\n' "$legacy_archive_path" >&2
         return 1
     fi
+    printf '%s|%s\n' '.agents/skills/astra-orchestrator' "$legacy_archive_path" > "$transaction_root/legacy-move"
     if ! mv "$legacy_skill_path" "$archive_destination"; then
+        rm -f "$transaction_root/legacy-move"
         printf 'Error: could not archive legacy skill to %s.\n' "$legacy_archive_path" >&2
         return 1
     fi
@@ -405,22 +542,26 @@ replace_managed_block() {
         return 1
     fi
 
-    if ! cp "$replacement_output" "$destination_path"; then
-        printf 'Error: could not write the managed block to %s.\n' "$destination_path" >&2
-        return 1
-    fi
     if [ "${preserve_crlf:-no}" = yes ]; then
         crlf_output=$transaction_root/agents-updated-crlf
-        if ! awk '{ printf "%s\r\n", $0 }' "$replacement_output" > "$crlf_output" || \
-            ! cp "$crlf_output" "$destination_path"; then
+        if ! awk '{ printf "%s\r\n", $0 }' "$replacement_output" > "$crlf_output"; then
             printf 'Error: could not preserve CRLF line endings in %s.\n' "$destination_path" >&2
             return 1
         fi
+        replacement_output=$crlf_output
     fi
+    install_file "$replacement_output" AGENTS.md || {
+        printf 'Error: could not write the managed block to %s.\n' "$destination_path" >&2
+        return 1
+    }
 }
 
 install_managed_agents() {
     destination_path=$1
+    safe_target_entry AGENTS.md || {
+        printf '%s\n' 'Error: AGENTS.md path passes through a symbolic link.' >&2
+        return 1
+    }
     normalized_path=$transaction_root/agents-normalized
     current_block_path=$transaction_root/current-managed-block
 
@@ -447,11 +588,16 @@ install_managed_agents() {
         fi
 
         printf '%s\n' 'WARNING: AGENTS.md contains an older managed instruction block.'
+        if ! cp -p "$destination_path" "$transaction_root/agents-original"; then
+            printf '%s\n' 'Error: could not snapshot AGENTS.md before prompting.' >&2
+            return 1
+        fi
         if ! confirm 'Update the managed instructions in AGENTS.md?' no; then
             printf '%s\n' 'Skipped AGENTS.md (existing managed instructions left unchanged).'
             return 0
         fi
-        if ! backup_component AGENTS.md; then
+        if ! files_match "$destination_path" "$transaction_root/agents-original"; then
+            printf '%s\n' 'Error: AGENTS.md changed while setup was waiting; no instruction text was replaced. Rerun setup to review the new file.' >&2
             return 1
         fi
         if [ "$current_namespace" = legacy ]; then
@@ -478,20 +624,26 @@ install_managed_agents() {
     fi
 
     printf '%s\n' 'WARNING: existing AGENTS.md has no managed instruction block; setup will append one.'
+    if ! cp -p "$destination_path" "$transaction_root/agents-original"; then
+        printf '%s\n' 'Error: could not snapshot AGENTS.md before prompting.' >&2
+        return 1
+    fi
     if ! confirm 'Add the managed instructions to AGENTS.md?' no; then
         printf '%s\n' 'Skipped AGENTS.md (existing contents left unchanged).'
         return 0
     fi
-    if ! backup_component AGENTS.md; then
+    if ! files_match "$destination_path" "$transaction_root/agents-original"; then
+        printf '%s\n' 'Error: AGENTS.md changed while setup was waiting; no instruction text was replaced. Rerun setup to review the new file.' >&2
         return 1
     fi
     if [ -s "$destination_path" ]; then
-        printf '\n\n' >> "$destination_path"
+        printf '\n\n' >> "$normalized_path"
     fi
-    if ! cat "$managed_block_path" >> "$destination_path"; then
+    if ! cat "$managed_block_path" >> "$normalized_path"; then
         printf 'Error: could not append managed instructions to %s.\n' "$destination_path" >&2
         return 1
     fi
+    install_file "$normalized_path" AGENTS.md || return 1
     printf '%s\n' 'Appended managed instructions to AGENTS.md. Existing contents preserved.'
     component_installed=yes
     component_satisfied=yes
@@ -508,6 +660,14 @@ copy_component() {
     if [ ! -e "$source_path" ] && [ ! -L "$source_path" ]; then
         printf 'Error: setup source is missing: %s\n' "$source_path" >&2
         return 1
+    fi
+    safe_target_entry "$name" || {
+        printf 'Skipped %s: target path passes through a symbolic link.\n' "$name" >&2
+        return 0
+    }
+
+    if [ "$name" = AGENTS.md ] && [ ! -e "$destination_path" ] && [ ! -L "$destination_path" ]; then
+        source_path=$managed_block_path
     fi
 
     if [ -e "$destination_path" ] || [ -L "$destination_path" ]; then
@@ -558,19 +718,16 @@ copy_component() {
             return 0
         fi
 
-        if ! backup_component "$name"; then
-            return 1
-        fi
         if [ -d "$source_path" ] && [ -d "$destination_path" ]; then
             if [ "$name" = .agents ] && ! archive_legacy_skill; then
                 return 1
             fi
-            if ! cp -R "$source_path"/. "$destination_path"/; then
+            if ! install_tree "$source_path" "$name"; then
                 printf 'Error: could not update %s.\n' "$name" >&2
                 return 1
             fi
         elif [ -f "$source_path" ] && [ -f "$destination_path" ]; then
-            if ! cp "$source_path" "$destination_path"; then
+            if ! install_file "$source_path" "$name"; then
                 printf 'Error: could not update %s.\n' "$name" >&2
                 return 1
             fi
@@ -580,10 +737,12 @@ copy_component() {
         fi
         printf 'Updated %s.\n' "$name"
     else
-        if ! backup_component "$name"; then
-            return 1
-        fi
-        if ! cp -R "$source_path" "$destination_path"; then
+        if [ -d "$source_path" ]; then
+            if ! install_tree "$source_path" "$name"; then
+                printf 'Error: could not install %s.\n' "$name" >&2
+                return 1
+            fi
+        elif ! install_file "$source_path" "$name"; then
             printf 'Error: could not install %s.\n' "$name" >&2
             return 1
         fi

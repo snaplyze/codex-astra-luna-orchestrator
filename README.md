@@ -7,6 +7,10 @@ A configurable Codex setup with four profiles: standard Pro and Plus profiles al
 Repository: [snaplyze/codex-orchestrator](https://github.com/snaplyze/codex-orchestrator).
 For an existing installation, follow the [rename migration guide](guides/migration.md).
 
+For maintenance and verification, see the [development guide](guides/development.md)
+and [audit remediation plan](docs/audit-remediation.md). The plan separates confirmed
+limitations from pending fixes and records their acceptance checks.
+
 The installer offers a quality-oriented Pro profile and a budget-oriented Plus profile. Pro uses Astra for coordination, Sol for implementation and testing, and Luna for exploration and research. Plus keeps coordination and execution on Luna. Both retain the independent Astra reviewer. Max-2 variants change only concurrency.
 
 These are project presets, not model access restrictions imposed by your subscription. See [model selection and migration](guides/model-selection.md) for the verified September 22, 2026 release details, routing rationale, and rollout fallback.
@@ -166,6 +170,8 @@ The installer then asks whether to install each component:
 - `AGENTS.md` gives Codex the project-level orchestration instructions. If it
   already exists, setup asks separately before appending to an unmanaged file or
   updating an older managed block, and preserves the user-owned contents.
+  A new file receives only the managed project instructions; source-repository
+  maintenance rules are not copied into your project.
   Re-running setup recognizes the managed block idempotently, including when the
   file uses CRLF line endings. Symbolic links and incompatible targets are
   skipped.
@@ -186,9 +192,18 @@ Existing-file updates default to `n`. If approved, missing files are added and
 only the listed paths are replaced. When migrating an older installation, setup
 also lists and archives the legacy skill outside `skills` before installing its
 replacement. Other files already present in the target component remain untouched.
-Component changes are backed up during the run and
-rolled back if a later installation step fails. If you decline one or more
+Changed files are journaled individually during the run and rolled back if a
+later installation step fails. If you decline one or more
 components, setup completes but reports that the installation is partial.
+
+Setup stages file replacements in the destination directory, so replacing a
+hardlinked config or `AGENTS.md` does not overwrite the linked external file.
+Rollback restores only unchanged installer output. Concurrent edits or deletions
+are preserved and reported, with recovery copies retained at the printed path;
+unrelated files are left alone. Newly created directories are removed only when
+empty. If `AGENTS.md` changes while its confirmation prompt is open, setup aborts
+the stale update. See [recovery and migration](guides/migration.md#failed-updates-and-recovery)
+for conflict handling and the limits of these safeguards.
 
 After setup, launch Codex from the target repository. Project-scoped `.codex`
 configuration is loaded only for trusted projects.
@@ -314,12 +329,12 @@ Orchestration is not free: the root stays in the loop for the whole task and
 every subagent carries its own context. Usage depends on repository size and
 task shape, so there is no single number. `scripts/token_usage.py` reads the
 rollout logs Codex already writes under `~/.codex/sessions` and reports usage
-per thread, role, and model, plus the change in your 5-hour and 7-day rate
-limit windows:
+per thread, role, and model, plus available quota-window snapshots. Reports
+identify partial scans, rollout segments and input/counter diagnostics:
 
 ```bash
 scripts/token_usage.py --list --date 2026-09-07
-scripts/token_usage.py --latest --date 2026-09-07
+scripts/token_usage.py --latest
 ```
 
 See [`guides/token-usage.md`](guides/token-usage.md) for a measurement

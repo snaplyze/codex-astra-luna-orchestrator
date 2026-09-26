@@ -3,8 +3,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import tomllib
 import unittest
+from queue import Queue
 from pathlib import Path
 
 
@@ -23,15 +25,12 @@ class InstallerIntegrationTests(unittest.TestCase):
         target: Path,
         answers: list[str],
         env: dict[str, str] | None = None,
+        installer_path: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         input_text = "\n".join([str(target), *answers]) + "\n"
-        if os.name == "nt":
-            shell = shutil.which("pwsh") or shutil.which("powershell")
-            if shell is None:
-                self.skipTest("PowerShell is unavailable")
-            command = [shell, "-NoProfile", "-NonInteractive", "-File", str(SETUP_PS1)]
-        else:
-            command = ["sh", str(SETUP_SH)]
+        command = self.engine_command()
+        if installer_path is not None:
+            command[-1] = str(installer_path)
         process_env = os.environ.copy()
         if env:
             process_env.update(env)
@@ -45,6 +44,345 @@ class InstallerIntegrationTests(unittest.TestCase):
             timeout=30,
             env=process_env,
         )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
+        if engine not in {"", "sh", "pwsh", "powershell"}:
+            raise ValueError(f"Unsupported installer test engine: {engine}")
+
+    def is_shell_engine(self) -> bool:
+        engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
+        return engine == "sh" or (not engine and os.name != "nt")
+
+    def engine_command(self) -> list[str]:
+        engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
+        executable = os.environ.get("CODEX_INSTALLER_TEST_EXECUTABLE")
+        if engine in {"pwsh", "powershell"} or (not engine and os.name == "nt"):
+            shell = executable or ("pwsh" if engine == "pwsh" else None)
+            shell = shell or (shutil.which("pwsh") if engine != "powershell" else None)
+            shell = shell or (shutil.which("powershell") if engine != "pwsh" else None)
+            if shell is None:
+                if engine:
+                    raise RuntimeError(f"Requested PowerShell engine is unavailable: {engine}")
+                self.skipTest("PowerShell is unavailable")
+            return [shell, "-NoProfile", "-NonInteractive", "-File", str(SETUP_PS1)]
+        return [executable or "sh", str(SETUP_SH)]
+
+    def start_until_prompt(self, target: Path, answers: list[str], prompt: str):
+        process = subprocess.Popen(
+            self.engine_command(),
+            cwd=ROOT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=0,
+        )
+        assert process.stdin is not None and process.stdout is not None
+        output: Queue[str] = Queue()
+
+        def collect_output() -> None:
+            assert process.stdout is not None
+            while chunk := process.stdout.read(1):
+                output.put(chunk)
+
+        reader = threading.Thread(target=collect_output, daemon=True)
+        reader.start()
+        process.stdin.write("\n".join([str(target), *answers]) + "\n")
+        seen = ""
+        while prompt not in seen:
+            try:
+                seen += output.get(timeout=10)
+            except Exception:
+                process.kill()
+                process.wait(timeout=10)
+                self.fail(f"installer did not reach synchronization prompt {prompt!r}; output={seen!r}")
+        return process, reader, output, seen
+
+    def finish_interactive(self, process, reader, output: Queue[str], seen: str, answer: str = ""):
+        assert process.stdin is not None
+        if answer:
+            process.stdin.write(answer)
+        process.stdin.close()
+        return_code = process.wait(timeout=10)
+        stderr = process.stderr.read() if process.stderr else ""
+        reader.join(timeout=2)
+        while not output.empty():
+            seen += output.get_nowait()
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+        return subprocess.CompletedProcess(process.args, return_code, seen, stderr)
+
+    def make_fault_injector(self, directory: Path, mode: str) -> tuple[dict[str, str], Path | None, Path | None]:
+        engine = os.environ.get("CODEX_INSTALLER_TEST_ENGINE", "").lower()
+        marker = directory / "fault-injected.marker"
+        if engine == "sh" or (not engine and os.name != "nt"):
+            executable_root = Path.home() / ".cache" / "codex-orchestrator-audit-tools" / "test-tmp"
+            executable_root.mkdir(parents=True, exist_ok=True)
+            injection_directory = Path(tempfile.mkdtemp(prefix="installer-fault-", dir=executable_root))
+            fake_bin = injection_directory / "bin"
+            fake_bin.mkdir()
+            real_mv = shutil.which("mv")
+            self.assertIsNotNone(real_mv)
+            shim = fake_bin / "mv"
+            shim.write_text(
+                "#!/bin/sh\n"
+                "last=\n"
+                "for argument do last=$argument; done\n"
+                f"case \"{mode}:$*:$last\" in\n"
+                f"  write:*codex-orchestrator-install*:*researcher.toml) : > '{marker}'; exit 42 ;;\n"
+                f"  restore:*codex-orchestrator-rollback*:*config.toml) : > '{marker}'; exit 43 ;;\n"
+                "esac\n"
+                f"exec {real_mv!s} \"$@\"\n"
+            )
+            shim.chmod(0o755)
+            return {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}, None, injection_directory
+
+        launcher = directory / "fault-launcher.ps1"
+        setup_path = str(SETUP_PS1).replace("'", "''")
+        marker_path = str(marker).replace("'", "''")
+        launcher.write_text(
+            "$global:realCopyItem = Get-Command Copy-Item -CommandType Cmdlet\n"
+            "function global:Copy-Item {\n"
+            "  [CmdletBinding()] param([string]$LiteralPath,[string]$Path,[string]$Destination,[switch]$Force,[switch]$Recurse)\n"
+                f"  if ((($env:CODEX_TEST_FAULT_MODE -eq 'write') -and ($LiteralPath -like '*researcher.toml')) -or (($env:CODEX_TEST_FAULT_MODE -eq 'restore') -and ($Destination -like '*rollback-*'))) {{\n"
+            f"    [IO.File]::WriteAllText('{marker_path}', 'injected')\n"
+            "    throw 'Injected installer file operation failure'\n"
+            "  }\n"
+            "  Microsoft.PowerShell.Management\\Copy-Item @PSBoundParameters\n"
+            "}\n"
+            f"& '{setup_path}'\n"
+            "exit $LASTEXITCODE\n"
+        )
+        return {"CODEX_TEST_FAULT_MODE": mode}, launcher, None
+
+    def test_new_agents_file_contains_only_managed_client_instructions(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            result = self.run_installer(target, ["1", "n", "n", "y"])
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            installed = (target / "AGENTS.md").read_text()
+            source = (ROOT / "AGENTS.md").read_text()
+            managed = source.split(MANAGED_BEGIN, 1)[1].split(MANAGED_END, 1)[0]
+            self.assertEqual(installed, f"{MANAGED_BEGIN}{managed}{MANAGED_END}\n")
+            self.assertNotIn("Maintaining this source repository", installed)
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links unavailable")
+    def test_hardlinked_config_replacement_does_not_change_external_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            codex = target / ".codex"
+            shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+            config = codex / "config.toml"
+            config.write_text("external sentinel\n")
+            external = Path(directory) / "external.toml"
+            os.link(config, external)
+
+            result = self.run_installer(target, ["1", "y", "y", "n", "n"])
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(external.read_text(), "external sentinel\n")
+            self.assertEqual(config.read_bytes(), (ROOT / "profiles" / "pro" / "codex" / "config.toml").read_bytes())
+
+    def test_cancelled_update_preserves_unrelated_concurrent_work(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            codex = target / ".codex"
+            shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+            config = codex / "config.toml"
+            config.write_text("old managed config\n")
+            process = subprocess.Popen(
+                self.engine_command(),
+                cwd=ROOT,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+            )
+            self.assertIsNotNone(process.stdin)
+            self.assertIsNotNone(process.stdout)
+            output: Queue[str] = Queue()
+
+            def collect_output() -> None:
+                assert process.stdout is not None
+                while chunk := process.stdout.read(1):
+                    output.put(chunk)
+
+            reader = threading.Thread(target=collect_output, daemon=True)
+            reader.start()
+            process.stdin.write(f"{target}\n1\ny\ny\n")
+            seen = ""
+            while "Install .agents?" not in seen:
+                try:
+                    seen += output.get(timeout=10)
+                except Exception:
+                    process.kill()
+                    self.fail(f"installer did not reach synchronization prompt; output={seen!r}")
+
+            config.write_text("concurrent managed edit\n")
+            (codex / "concurrent.txt").write_text("concurrent new file\n")
+            process.stdin.close()
+            return_code = process.wait(timeout=10)
+            stderr = process.stderr.read() if process.stderr else ""
+            reader.join(timeout=2)
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+
+            self.assertNotEqual(return_code, 0, seen + stderr)
+            self.assertEqual(config.read_text(), "concurrent managed edit\n")
+            self.assertEqual((codex / "concurrent.txt").read_text(), "concurrent new file\n")
+            self.assertIn("concurrent change", stderr.lower())
+            self.assertIn("retained", stderr.lower())
+
+    def test_cancelled_fresh_install_removes_only_installer_created_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            result = self.run_installer(target, ["1", "y"])
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((target / ".codex").exists())
+            self.assertFalse((target / ".agents").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
+
+    @unittest.skipUnless(hasattr(os, "link"), "hard links unavailable")
+    def test_hardlinked_agents_replacement_does_not_change_external_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            source = (ROOT / "AGENTS.md").read_text()
+            stale = source.replace("adaptive routing", "outdated routing")
+            agents = target / "AGENTS.md"
+            agents.write_text(stale)
+            external = Path(directory) / "external-agents.md"
+            os.link(agents, external)
+
+            result = self.run_installer(target, ["1", "n", "n", "y", "y"])
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(external.read_text(), stale)
+            self.assertNotIn("outdated routing", agents.read_text())
+
+    def test_deleted_managed_output_is_preserved_as_a_rollback_conflict(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            codex = target / ".codex"
+            shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+            config = codex / "config.toml"
+            config.write_text("old managed config\n")
+            process, reader, output, seen = self.start_until_prompt(target, ["1", "y", "y"], "Install .agents?")
+            config.unlink()
+            result = self.finish_interactive(process, reader, output, seen)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(config.exists())
+            self.assertIn("concurrent change", result.stderr.lower())
+            recovery = re.search(r"recovery copies are in (.+)\.", result.stderr)
+            self.assertIsNotNone(recovery, result.stderr)
+            self.assertEqual((Path(recovery.group(1)) / "before").read_text(), "old managed config\n")
+
+    def test_agents_edit_while_update_prompt_is_open_aborts_without_losing_text(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            source = (ROOT / "AGENTS.md").read_text()
+            initial = "User instructions\n\n" + source.replace("adaptive routing", "outdated routing")
+            agents = target / "AGENTS.md"
+            agents.write_text(initial)
+            process, reader, output, seen = self.start_until_prompt(
+                target, ["1", "n", "n", "y"], "Update the managed instructions in AGENTS.md?"
+            )
+            concurrent = initial.replace("User instructions", "Concurrent user instructions")
+            agents.write_text(concurrent)
+            result = self.finish_interactive(process, reader, output, seen, "y\n")
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(agents.read_text(), concurrent)
+            self.assertIn("changed while setup was waiting", result.stderr)
+
+    def test_legacy_rollback_does_not_follow_concurrent_skills_symlink(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            target = self.make_target(directory)
+            agents_dir = target / ".agents"
+            shutil.copytree(ROOT / "profiles" / "pro" / "agents", agents_dir)
+            (agents_dir / "skills" / "codex-orchestrator").rename(agents_dir / "skills" / "astra-orchestrator")
+            (agents_dir / "skills" / "astra-orchestrator" / "SKILL.md").write_text("legacy user skill\n")
+            legacy_agents = (ROOT / "AGENTS.md").read_text()
+            (target / "AGENTS.md").write_text(
+                legacy_agents.replace(MANAGED_BEGIN, LEGACY_MANAGED_BEGIN)
+                .replace(MANAGED_END, LEGACY_MANAGED_END)
+                .replace("codex-orchestrator", "astra-orchestrator")
+            )
+            external_skills = Path(directory) / "external skills"
+            external_skill = external_skills / "codex-orchestrator"
+            external_skill.mkdir(parents=True)
+            process, reader, output, seen = self.start_until_prompt(target, ["1", "n", "y", "y"], "Install AGENTS.md?")
+            original_skills = agents_dir / "original-skills"
+            (agents_dir / "skills").rename(original_skills)
+            try:
+                (agents_dir / "skills").symlink_to(external_skills, target_is_directory=True)
+            except OSError as exc:
+                process.kill()
+                process.wait(timeout=10)
+                self.skipTest(f"symbolic links unavailable: {exc}")
+            result = self.finish_interactive(process, reader, output, seen)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(external_skill.is_dir())
+            self.assertEqual(list(external_skill.iterdir()), [])
+            self.assertFalse((external_skills / "astra-orchestrator").exists())
+            self.assertIn("symbolic link", result.stderr.lower())
+
+    def test_file_write_failure_rolls_back_prior_managed_replacements(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            fixture = Path(directory)
+            target = self.make_target(directory)
+            codex = target / ".codex"
+            shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+            (codex / "config.toml").write_text("old config\n")
+            (codex / "agents" / "explorer.toml").write_text("old explorer role\n")
+            (codex / "user-owned.txt").write_text("user data\n")
+            before = {path.relative_to(codex): path.read_bytes() for path in codex.rglob("*") if path.is_file()}
+            env, launcher, injection_directory = self.make_fault_injector(fixture, "write")
+            if injection_directory is not None:
+                self.addCleanup(shutil.rmtree, injection_directory, ignore_errors=True)
+
+            result = self.run_installer(target, ["1", "y", "y", "n", "n"], env=env, installer_path=launcher)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((fixture / "fault-injected.marker").is_file())
+            after = {path.relative_to(codex): path.read_bytes() for path in codex.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+    def test_failed_file_restore_retains_before_image_and_manifest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
+            fixture = Path(directory)
+            target = self.make_target(directory)
+            codex = target / ".codex"
+            shutil.copytree(ROOT / "profiles" / "plus" / "codex", codex)
+            (codex / "config.toml").write_text("old config\n")
+            (codex / "user-owned.txt").write_text("user data\n")
+            env, launcher, injection_directory = self.make_fault_injector(fixture, "restore")
+            if injection_directory is not None:
+                self.addCleanup(shutil.rmtree, injection_directory, ignore_errors=True)
+
+            result = self.run_installer(target, ["1", "y", "y"], env=env, installer_path=launcher)
+            output = result.stdout + result.stderr
+
+            self.assertNotEqual(result.returncode, 0, output)
+            self.assertTrue((fixture / "fault-injected.marker").is_file())
+            self.assertIn("rollback was incomplete", output.lower())
+            retained = re.search(r"transaction backups were retained at (.+)", output)
+            self.assertIsNotNone(retained, output)
+            transaction = Path(retained.group(1).strip())
+            config_entry = next(entry for entry in transaction.glob("entry-*") if (entry / "manifest.txt").read_text().splitlines()[0] == ".codex/config.toml")
+            self.assertEqual((config_entry / "before").read_text(), "old config\n")
+            self.assertIn(".codex/config.toml", (config_entry / "manifest.txt").read_text())
+            self.assertEqual((codex / "user-owned.txt").read_text(), "user data\n")
 
     def make_target(self, directory: str) -> Path:
         target = Path(directory) / "target project"
@@ -324,7 +662,6 @@ class InstallerIntegrationTests(unittest.TestCase):
                 self.assertFalse((agents_dir / "migration-backups").exists())
                 self.assertFalse((agents_dir / "skills" / "codex-orchestrator").exists())
 
-    @unittest.skipUnless(os.name != "nt", "shell failure-injection test is POSIX-only")
     def test_failed_agents_update_rolls_back_archived_legacy_skill(self) -> None:
         with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
             target = self.make_target(directory)
@@ -348,19 +685,7 @@ class InstallerIntegrationTests(unittest.TestCase):
                 for path in agents_dir.rglob("*")
                 if path.is_file()
             }
-            with tempfile.TemporaryDirectory(prefix=".codex fake bin ", dir=Path.home()) as fake_directory:
-                fake_bin = Path(fake_directory)
-                real_cp = shutil.which("cp")
-                self.assertIsNotNone(real_cp)
-                (fake_bin / "cp").write_text(
-                    "#!/bin/sh\n"
-                    "case \"$*\" in *agents-updated*) exit 42 ;; esac\n"
-                    f"exec {real_cp!s} \"$@\"\n"
-                )
-                (fake_bin / "cp").chmod(0o755)
-                env = {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
-
-                result = self.run_installer(target, ["1", "n", "y", "y", "y", "y"], env=env)
+            result = self.run_installer(target, ["1", "n", "y", "y", "y"])
 
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual((target / "AGENTS.md").read_bytes(), original_agents)
@@ -530,72 +855,6 @@ class InstallerIntegrationTests(unittest.TestCase):
             self.assertTrue(link.is_symlink())
             self.assertFalse((linked / "config.toml").exists())
             self.assertIn("symbolic link", (result.stdout + result.stderr).lower())
-
-    @unittest.skipUnless(os.name != "nt", "shell failure-injection test is POSIX-only")
-    def test_failed_component_copy_rolls_back_prior_new_components(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
-            target = self.make_target(directory)
-            with tempfile.TemporaryDirectory(prefix=".codex fake bin ", dir=Path.home()) as fake_directory:
-                fake_bin = Path(fake_directory)
-                real_cp = shutil.which("cp")
-                self.assertIsNotNone(real_cp)
-                (fake_bin / "cp").write_text(
-                    "#!/bin/sh\n"
-                    "case \"$*\" in\n"
-                    "  */.agents) exit 42 ;;\n"
-                    "esac\n"
-                    f"exec {real_cp!s} \"$@\"\n"
-                )
-                (fake_bin / "cp").chmod(0o755)
-                env = {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
-
-                result = self.run_installer(target, ["1", "y", "y"], env=env)
-
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse((target / ".codex").exists())
-                self.assertFalse((target / ".agents").exists())
-                self.assertFalse((target / "AGENTS.md").exists())
-                self.assertIn("restoring", (result.stdout + result.stderr).lower())
-
-    @unittest.skipUnless(os.name != "nt", "shell failure-injection test is POSIX-only")
-    def test_failed_restore_retains_transaction_backup(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="codex installer ") as directory:
-            target = self.make_target(directory)
-            codex = target / ".codex"
-            codex.mkdir()
-            (codex / "user-owned.txt").write_text("user-owned\n")
-            with tempfile.TemporaryDirectory(prefix=".codex fake bin ", dir=Path.home()) as fake_directory:
-                fake_bin = Path(fake_directory)
-                real_cp = shutil.which("cp")
-                self.assertIsNotNone(real_cp)
-                (fake_bin / "cp").write_text(
-                    "#!/bin/bash\n"
-                    "last=\"${!#}\"\n"
-                    "case \"$last\" in\n"
-                    "  */.agents) exit 42 ;;\n"
-                    "  */.codex|*/.codex/)\n"
-                    "    case \"$*\" in *backup-.codex*) exit 43 ;; esac\n"
-                    "    ;;\n"
-                    "esac\n"
-                    f"exec {real_cp!s} \"$@\"\n"
-                )
-                (fake_bin / "cp").chmod(0o755)
-                env = {"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
-
-                result = self.run_installer(target, ["1", "y", "y", "y"], env=env)
-                output = result.stdout + result.stderr
-
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("rollback was incomplete", output.lower())
-                match = re.search(r"transaction backups were retained at (.+)", output)
-                self.assertIsNotNone(match, output)
-                backup_path = Path(match.group(1).strip())
-                self.assertTrue(
-                    (backup_path / "backup-.codex" / "user-owned.txt").is_file(),
-                    f"backup path: {backup_path}; entries: {list(backup_path.parent.glob('codex-orchestrator-install.*'))}",
-                )
-                shutil.rmtree(backup_path)
-
 
 if __name__ == "__main__":
     unittest.main()

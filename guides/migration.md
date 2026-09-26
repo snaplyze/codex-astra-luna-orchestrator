@@ -46,7 +46,32 @@ needed customizations into `.agents/skills/codex-orchestrator/SKILL.md`.
 Declining a component leaves it unchanged and can leave the migration incomplete.
 If you update `.agents` but decline the instruction update, old skill references
 can stop resolving. Rerun setup and approve the remaining updates before starting
-a new task. Failures during setup restore changes made during that run.
+a new task.
+
+## Failed updates and recovery
+
+Setup journals each managed file and replaces its directory entry with a staged
+file. Existing hardlinks therefore keep their original external contents.
+On a normal failure or cancellation, rollback restores a file only while it still
+matches the installer's recorded state. Concurrent user edits, deletions and
+unrelated new files are preserved. Symbolic links and Windows reparse points are
+rechecked before managed writes and rollback operations. Created directories are
+removed only when empty; a legacy archive is not moved over an occupied path.
+
+A conflict or failed restoration prints the retained transaction directory.
+Keep it until you have reviewed the affected files. Each `entry-N` holds `before`
+(when the target existed) and `after` copies; `manifest.txt` identifies the
+target's relative path. Compare those
+copies with the current target and merge the intended content manually. Do not
+restore the whole component over newer work. The warning identifies any retained
+legacy archive separately. Recovery copies can contain private configuration;
+do not commit or publish them.
+
+These safeguards handle normal failures and detected concurrent changes. They
+are not crash recovery after a forced process kill or power loss, nor a guarantee
+against a hostile process racing every filesystem operation. Avoid editing
+managed paths during setup. Native platform verification and remaining limits
+are recorded in the [audit remediation plan](../docs/audit-remediation.md).
 
 ## Manual or global installations
 

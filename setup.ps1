@@ -12,6 +12,9 @@ $legacyManagedBegin = '<!-- BEGIN codex-astra-luna-orchestrator:managed -->'
 $legacyManagedEnd = '<!-- END codex-astra-luna-orchestrator:managed -->'
 $transactionRoot = $null
 $transactionChanges = @()
+$transactionDirectories = @()
+$script:transactionEntryCount = 0
+$legacyMove = $null
 $transactionCommitted = $false
 $transactionPreserved = $false
 $managedBlockLines = @()
@@ -101,7 +104,7 @@ function Copy-DirectoryContents {
 
         if ($sourceChild.PSIsContainer) {
             if ($null -eq $destinationChild) {
-                New-Item -ItemType Directory -Path $destinationChildPath | Out-Null
+                Ensure-InstallDirectory -Path $destinationChildPath
             }
             elseif (-not $destinationChild.PSIsContainer) {
                 throw "Cannot merge directory over file: $destinationChildPath"
@@ -114,7 +117,7 @@ function Copy-DirectoryContents {
                 throw "Cannot overwrite directory with file: $destinationChildPath"
             }
 
-            Copy-Item -LiteralPath $sourceChild.FullName -Destination $destinationChildPath -Force | Out-Null
+            Write-InstallFile -Source $sourceChild.FullName -Destination $destinationChildPath
         }
     }
 }
@@ -256,6 +259,19 @@ function Start-InstallTransaction {
     $rootName = 'codex-orchestrator-install-' + [Guid]::NewGuid().ToString('N')
     $script:transactionRoot = Join-Path ([IO.Path]::GetTempPath()) $rootName
     New-Item -ItemType Directory -Path $script:transactionRoot -Force | Out-Null
+    if ([IO.Path]::DirectorySeparatorChar -eq '/') {
+        $setMode = [IO.File].GetMethods() | Where-Object {
+            $parameters = $_.GetParameters()
+            ($_.Name -eq 'SetUnixFileMode') -and ($parameters.Count -eq 2) -and
+                ($parameters[0].ParameterType -eq [string]) -and $parameters[1].ParameterType.IsEnum
+        } | Select-Object -First 1
+        if ($null -ne $setMode) {
+            $modeType = $setMode.GetParameters()[1].ParameterType
+            $privateMode = [Enum]::ToObject($modeType, 448)
+            [object[]]$arguments = @([string]$script:transactionRoot, $privateMode)
+            $setMode.Invoke($null, $arguments)
+        }
+    }
 
     $sourceAgentsPath = Join-Path $scriptDir 'AGENTS.md'
     $sourceLines = @([IO.File]::ReadAllLines($sourceAgentsPath))
@@ -269,38 +285,127 @@ function Start-InstallTransaction {
     [IO.File]::WriteAllLines($script:managedBlockPath, $script:managedBlockLines, [Text.UTF8Encoding]::new($false))
 }
 
-function Backup-InstallComponent {
+function Get-FileMetadata {
+    param([Parameter(Mandatory)][string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force
+    $unixMode = ''
+    $method = [IO.File].GetMethod('GetUnixFileMode', [Type[]]@([string]))
+    if (($null -ne $method) -and ([IO.Path]::DirectorySeparatorChar -eq '/')) {
+        $unixMode = [string]$method.Invoke($null, @($Path))
+    }
+    return "$($item.Attributes)|$unixMode"
+}
+
+function Test-FileMatches {
     param(
-        [Parameter(Mandatory)]
-        [string]$Name,
-
-        [Parameter(Mandatory)]
-        [string]$TargetDirectory
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExpectedPath,
+        [Parameter(Mandatory)][string]$ExpectedMetadata
     )
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (($null -eq $item) -or $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { return $false }
+    $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $expectedHash = (Get-FileHash -LiteralPath $ExpectedPath -Algorithm SHA256).Hash
+    return ($actualHash -ceq $expectedHash) -and ((Get-FileMetadata -Path $Path) -ceq $ExpectedMetadata)
+}
 
-    if ([string]::IsNullOrEmpty($script:transactionRoot)) {
-        throw 'Installation transaction has not been started.'
+function Test-SafeTargetPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $relativePath = $Path.Substring($targetDirectory.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $currentPath = $targetDirectory
+    $rootItem = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+    if (($null -eq $rootItem) -or (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { return $false }
+    foreach ($part in $relativePath.Split([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)) {
+        $currentPath = Join-Path $currentPath $part
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+        if (($null -ne $item) -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { return $false }
     }
+    return $true
+}
 
-    $destinationPath = Join-Path $TargetDirectory $Name
-    $destinationItem = Get-Item -LiteralPath $destinationPath -Force -ErrorAction SilentlyContinue
-    $backupPath = $null
+function Ensure-InstallDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-SafeTargetPath -Path $Path)) { throw "Managed directory path passes through a symbolic link or junction: $Path" }
+    $existingItem = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existingItem) {
+        if (-not $existingItem.PSIsContainer) { throw "Managed directory path is incompatible: $Path" }
+        if (($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Managed directory path passes through a symbolic link or junction: $Path" }
+        return
+    }
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        Ensure-InstallDirectory -Path $parent
+    }
+    New-Item -ItemType Directory -Path $Path | Out-Null
+    $script:transactionDirectories += $Path
+}
+
+function Write-InstallFile {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    if (-not (Test-SafeTargetPath -Path $Destination)) { throw "Managed path passes through a symbolic link or junction: $Destination" }
+    $destinationItem = Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
     $existing = $null -ne $destinationItem
-    if ($existing) {
-        if (($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Refusing to back up symbolic link or junction component: $Name"
-        }
-        $backupName = 'backup-' + ($Name.Replace('/', '_').Replace('\', '_'))
-        $backupPath = Join-Path $script:transactionRoot $backupName
-        Copy-Item -LiteralPath $destinationPath -Destination $backupPath -Recurse -Force | Out-Null
+    if ($existing -and ($destinationItem.PSIsContainer -or (($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        throw "Managed file path is incompatible: $Destination"
     }
 
-    $change = [pscustomobject]@{
-        Name       = $Name
-        Existing   = $existing
-        BackupPath = $backupPath
+    $script:transactionEntryCount++
+    $entryDirectory = Join-Path $script:transactionRoot "entry-$script:transactionEntryCount"
+    New-Item -ItemType Directory -Path $entryDirectory | Out-Null
+    $beforePath = $null
+    if ($existing) {
+        $beforePath = Join-Path $entryDirectory 'before'
+        Copy-Item -LiteralPath $Destination -Destination $beforePath -Force
+        $afterPath = Join-Path $entryDirectory 'after'
+        Copy-Item -LiteralPath $Destination -Destination $afterPath -Force
+        [IO.File]::WriteAllBytes($afterPath, [IO.File]::ReadAllBytes($Source))
+        $beforeMetadata = Get-FileMetadata -Path $beforePath
+        $afterMetadata = Get-FileMetadata -Path $afterPath
     }
-    $script:transactionChanges = @($change) + @($script:transactionChanges)
+    else {
+        $afterPath = Join-Path $entryDirectory 'after'
+        Copy-Item -LiteralPath $Source -Destination $afterPath -Force
+        $beforeMetadata = ''
+        $afterMetadata = Get-FileMetadata -Path $afterPath
+    }
+    $relativePath = $Destination.Substring($targetDirectory.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar).Replace('\', '/')
+    [IO.File]::WriteAllText((Join-Path $entryDirectory 'manifest.txt'), "$relativePath`n$existing`n", [Text.UTF8Encoding]::new($false))
+    $script:transactionChanges += [pscustomobject]@{
+        Destination = $Destination
+        RelativePath = $relativePath
+        Existing = $existing
+        BeforePath = $beforePath
+        AfterPath = $afterPath
+        BeforeMetadata = $beforeMetadata
+        AfterMetadata = $afterMetadata
+        EntryDirectory = $entryDirectory
+    }
+
+    Ensure-InstallDirectory -Path (Split-Path -Parent $Destination)
+    if (-not (Test-SafeTargetPath -Path $Destination)) { throw "Managed path passes through a symbolic link or junction: $Destination" }
+    $temporaryPath = Join-Path (Split-Path -Parent $Destination) ('.codex-orchestrator-install-' + [Guid]::NewGuid().ToString('N'))
+    Copy-Item -LiteralPath $afterPath -Destination $temporaryPath
+    try {
+        if ($existing -and (-not (Test-FileMatches -Path $Destination -ExpectedPath $beforePath -ExpectedMetadata $beforeMetadata))) {
+            throw "Managed file changed during setup; preserving current contents: $relativePath"
+        }
+        if ((-not $existing) -and (Test-Path -LiteralPath $Destination)) {
+            throw "Managed path appeared during setup; preserving current contents: $relativePath"
+        }
+        if (-not (Test-SafeTargetPath -Path $Destination)) { throw "Managed path passes through a symbolic link or junction: $Destination" }
+        if ($existing) {
+            [IO.File]::Replace($temporaryPath, $Destination, [NullString]::Value)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $Destination)
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+    }
 }
 
 function Restore-InstallTransaction {
@@ -308,23 +413,70 @@ function Restore-InstallTransaction {
         return
     }
 
-    [Console]::Error.WriteLine('Setup failed; restoring the target to its previous state.')
+    [Console]::Error.WriteLine('Setup failed; reverting installer changes and preserving concurrent edits.')
     $restoreFailed = $false
-    foreach ($change in @($script:transactionChanges)) {
-        $destinationPath = Join-Path $targetDirectory $change.Name
+    $changesToRestore = @($script:transactionChanges)
+    [array]::Reverse($changesToRestore)
+    foreach ($change in $changesToRestore) {
+        $destinationPath = $change.Destination
         try {
-            $destinationItem = Get-Item -LiteralPath $destinationPath -Force -ErrorAction SilentlyContinue
-            if ($null -ne $destinationItem) {
-                Remove-Item -LiteralPath $destinationPath -Recurse -Force -ErrorAction Stop
+            if (-not (Test-SafeTargetPath -Path $destinationPath)) {
+                $restoreFailed = $true
+                [Console]::Error.WriteLine("WARNING: managed path $($change.RelativePath) became a symbolic link or passed through one; it was preserved with recovery copies in $($change.EntryDirectory).")
+                continue
             }
-            if ($change.Existing) {
-                Copy-Item -LiteralPath $change.BackupPath -Destination $destinationPath -Recurse -Force | Out-Null
+            if ($change.Existing -and (Test-FileMatches -Path $destinationPath -ExpectedPath $change.BeforePath -ExpectedMetadata $change.BeforeMetadata)) {
+                continue
+            }
+            if ($change.Existing -and (Test-FileMatches -Path $destinationPath -ExpectedPath $change.AfterPath -ExpectedMetadata $change.AfterMetadata)) {
+                $temporaryPath = Join-Path (Split-Path -Parent $destinationPath) ('.codex-orchestrator-rollback-' + [Guid]::NewGuid().ToString('N'))
+                Copy-Item -LiteralPath $change.BeforePath -Destination $temporaryPath
+                [IO.File]::Replace($temporaryPath, $destinationPath, [NullString]::Value)
+            }
+            elseif ((-not $change.Existing) -and (Test-FileMatches -Path $destinationPath -ExpectedPath $change.AfterPath -ExpectedMetadata $change.AfterMetadata)) {
+                Remove-Item -LiteralPath $destinationPath -Force -ErrorAction Stop
+            }
+            elseif ((-not $change.Existing) -and (-not (Test-Path -LiteralPath $destinationPath))) {
+                continue
+            }
+            else {
+                $restoreFailed = $true
+                [Console]::Error.WriteLine("WARNING: concurrent change at $($change.RelativePath) was preserved; recovery copies are in $($change.EntryDirectory).")
             }
         }
         catch {
             $restoreFailed = $true
-            [Console]::Error.WriteLine("Warning: could not restore $($change.Name): $($_.Exception.Message)")
+            [Console]::Error.WriteLine("Warning: could not restore $($change.RelativePath): $($_.Exception.Message)")
         }
+    }
+    if ($null -ne $script:legacyMove) {
+        $archiveExists = Test-Path -LiteralPath $script:legacyMove.Archive
+        $originalExists = Test-Path -LiteralPath $script:legacyMove.Original
+        if ((-not (Test-SafeTargetPath -Path $script:legacyMove.Archive)) -or (-not (Test-SafeTargetPath -Path $script:legacyMove.Original))) {
+            $restoreFailed = $true
+            [Console]::Error.WriteLine("WARNING: legacy skill rollback path became a symbolic link; archive preserved at $($script:legacyMove.Archive).")
+        }
+        elseif ($archiveExists -and (-not $originalExists)) {
+            try { Move-Item -LiteralPath $script:legacyMove.Archive -Destination $script:legacyMove.Original -ErrorAction Stop }
+            catch {
+                $restoreFailed = $true
+                [Console]::Error.WriteLine("Warning: could not restore archived legacy skill: $($_.Exception.Message)")
+            }
+        }
+        elseif ($archiveExists -and $originalExists) {
+            $restoreFailed = $true
+            [Console]::Error.WriteLine("WARNING: legacy skill rollback destination is occupied; archive preserved at $($script:legacyMove.Archive).")
+        }
+    }
+    $directoriesToRemove = @($script:transactionDirectories)
+    [array]::Reverse($directoriesToRemove)
+    foreach ($directory in $directoriesToRemove) {
+        if (-not (Test-SafeTargetPath -Path $directory)) {
+            $restoreFailed = $true
+            [Console]::Error.WriteLine("WARNING: created directory $directory now passes through a symbolic link or junction; it was preserved.")
+            continue
+        }
+        try { [IO.Directory]::Delete($directory, $false) } catch { }
     }
     if ($restoreFailed) {
         $script:transactionPreserved = $true
@@ -350,6 +502,8 @@ function Clear-InstallTransaction {
     $script:transactionRoot = $null
     $script:managedBlockPath = $null
     $script:transactionChanges = @()
+    $script:transactionDirectories = @()
+    $script:legacyMove = $null
     $script:transactionPreserved = $false
 }
 
@@ -378,8 +532,12 @@ function Update-ManagedAgents {
         [Parameter(Mandatory)]
         [string]$TargetDirectory
     )
+    if (-not (Test-SafeTargetPath -Path $DestinationPath)) { throw 'AGENTS.md path passes through a symbolic link or junction.' }
 
     $currentLines = @([IO.File]::ReadAllLines($DestinationPath))
+    $originalSnapshot = Join-Path $script:transactionRoot 'agents-original'
+    Copy-Item -LiteralPath $DestinationPath -Destination $originalSnapshot -Force
+    $originalMetadata = Get-FileMetadata -Path $originalSnapshot
     $currentInfo = Get-ManagedBlockInfo -Lines $currentLines
     if ($currentInfo.IsMalformed) {
         throw 'Existing AGENTS.md has a malformed managed instruction block.'
@@ -399,8 +557,10 @@ function Update-ManagedAgents {
             [Console]::WriteLine('Skipped AGENTS.md (existing managed instructions left unchanged).')
             return $false
         }
+        if (-not (Test-FileMatches -Path $DestinationPath -ExpectedPath $originalSnapshot -ExpectedMetadata $originalMetadata)) {
+            throw 'AGENTS.md changed while setup was waiting; no instruction text was replaced. Rerun setup to review the new file.'
+        }
 
-        Backup-InstallComponent -Name 'AGENTS.md' -TargetDirectory $TargetDirectory
         $updatedLines = New-Object 'System.Collections.Generic.List[string]'
         for ($index = 0; $index -lt $currentLines.Count; $index++) {
             if ($index -eq $currentInfo.BeginIndex) {
@@ -413,7 +573,9 @@ function Update-ManagedAgents {
             $updatedLines.Add($currentLines[$index])
         }
         $newLine = if ([IO.File]::ReadAllText($DestinationPath).Contains("`r`n")) { "`r`n" } else { "`n" }
-        Write-TextLines -Path $DestinationPath -Lines $updatedLines.ToArray() -NewLine $newLine
+        $stagedAgents = Join-Path $script:transactionRoot 'agents-updated'
+        Write-TextLines -Path $stagedAgents -Lines $updatedLines.ToArray() -NewLine $newLine
+        Write-InstallFile -Source $stagedAgents -Destination $DestinationPath
         [Console]::WriteLine('Updated the managed instructions in AGENTS.md.')
         $script:componentSatisfied = $true
         return $true
@@ -424,8 +586,10 @@ function Update-ManagedAgents {
         [Console]::WriteLine('Skipped AGENTS.md (existing contents left unchanged).')
         return $false
     }
+    if (-not (Test-FileMatches -Path $DestinationPath -ExpectedPath $originalSnapshot -ExpectedMetadata $originalMetadata)) {
+        throw 'AGENTS.md changed while setup was waiting; no instruction text was replaced. Rerun setup to review the new file.'
+    }
 
-    Backup-InstallComponent -Name 'AGENTS.md' -TargetDirectory $TargetDirectory
     $existingText = [IO.File]::ReadAllText($DestinationPath).Replace("`r`n", "`n").Replace("`r", "`n")
     $blockText = [string]::Join("`n", [string[]]$script:managedBlockLines)
     if ($existingText.Length -eq 0) {
@@ -437,7 +601,9 @@ function Update-ManagedAgents {
     else {
         $updatedText = $existingText + "`n`n" + $blockText + "`n"
     }
-    [IO.File]::WriteAllText($DestinationPath, $updatedText, [Text.UTF8Encoding]::new($false))
+    $stagedAgents = Join-Path $script:transactionRoot 'agents-updated'
+    [IO.File]::WriteAllText($stagedAgents, $updatedText, [Text.UTF8Encoding]::new($false))
+    Write-InstallFile -Source $stagedAgents -Destination $DestinationPath
     [Console]::WriteLine('Appended managed instructions to AGENTS.md. Existing contents preserved.')
     $script:componentSatisfied = $true
     return $true
@@ -542,6 +708,13 @@ function Install-Component {
     $script:componentSatisfied = $false
     $sourcePath = $SourcePath
     $destinationPath = Join-Path $TargetDirectory $Name
+    if (($Name -eq 'AGENTS.md') -and (-not (Test-Path -LiteralPath $destinationPath))) {
+        $SourcePath = $script:managedBlockPath
+    }
+    if (-not (Test-SafeTargetPath -Path $destinationPath)) {
+        [Console]::Error.WriteLine("Skipped ${Name}: target path passes through a symbolic link or junction.")
+        return $false
+    }
     $sourceItem = Get-Item -LiteralPath $sourcePath -Force -ErrorAction SilentlyContinue
     if ($null -eq $sourceItem) {
         throw "Setup source is missing: $sourcePath"
@@ -600,11 +773,17 @@ function Install-Component {
             return $false
         }
 
-        Backup-InstallComponent -Name $Name -TargetDirectory $TargetDirectory
         if ($null -ne $archivePath) {
-            New-Item -ItemType Directory -Path (Split-Path -Parent $archivePath) -Force | Out-Null
+            Ensure-InstallDirectory -Path (Split-Path -Parent $archivePath)
+            if ((-not (Test-SafeTargetPath -Path (Join-Path $destinationPath 'skills/astra-orchestrator'))) -or (-not (Test-SafeTargetPath -Path $archivePath))) {
+                throw 'Legacy skill migration path passes through a symbolic link or junction.'
+            }
             if ($null -ne (Get-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue)) {
                 throw "Migration archive destination appeared during setup: $archivePath"
+            }
+            $script:legacyMove = [pscustomobject]@{
+                Original = Join-Path $destinationPath 'skills/astra-orchestrator'
+                Archive = $archivePath
             }
             Move-Item -LiteralPath (Join-Path $destinationPath 'skills/astra-orchestrator') -Destination $archivePath | Out-Null
             $script:legacySkillArchived = $true
@@ -614,7 +793,7 @@ function Install-Component {
             Copy-DirectoryContents -Source $sourcePath -Destination $destinationPath
         }
         elseif ((-not $sourceItem.PSIsContainer) -and (-not $destinationItem.PSIsContainer)) {
-            Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force | Out-Null
+            Write-InstallFile -Source $sourcePath -Destination $destinationPath
         }
         else {
             [Console]::Error.WriteLine("Skipped ${Name}: source and target types are incompatible.")
@@ -626,8 +805,13 @@ function Install-Component {
         return $true
     }
 
-    Backup-InstallComponent -Name $Name -TargetDirectory $TargetDirectory
-    Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force | Out-Null
+    if ($sourceItem.PSIsContainer) {
+        Ensure-InstallDirectory -Path $destinationPath
+        Copy-DirectoryContents -Source $sourcePath -Destination $destinationPath
+    }
+    else {
+        Write-InstallFile -Source $sourcePath -Destination $destinationPath
+    }
     [Console]::WriteLine("Installed $Name.")
     $script:componentSatisfied = $true
     return $true
